@@ -16,6 +16,31 @@
 (require 'arch-sets)
 (require 'arch-elpa)
 
+;; Register yay backend if not present so headless tests can exercise AUR dispatch
+(unless (map-elt arch--backends "yay")
+  (arch-register-backend
+   (arch-backend--make
+    :name "yay"
+    :label "yay (AUR)"
+    :search-fn #'arch--yay-search
+    :aur-search-fn #'arch--yay-search-aur
+    :info-fn #'arch--pacman-info
+    :files-fn #'arch--pacman-files
+    :list-fn #'arch--pacman-list
+    :list-all-fn #'arch--yay-list-all
+    :foreign-fn #'arch--foreign-packages
+    :upgradeable-fn #'arch--upgradeable-packages
+    :populate-cache-fn #'arch--pacman-populate-cache
+    :aur-list-fn #'arch--yay-aur-list
+    :install-methods '((abs     . arch--aur-abs-install)
+                       (rebuild . arch--aur-abs-rebuild))
+    :default-install-method 'abs
+    :remove-fn #'arch--yay-remove
+    :upgrade-fn #'arch--aur-abs-install
+    :upgrade-all-fn #'arch--pacman-upgrade-all-warn-aur
+    :abs-install-fn #'arch--aur-abs-install
+    :abs-rebuild-fn #'arch--aur-abs-rebuild)))
+
 ;;; 1. Backend Protocol Tests
 
 (ert-deftest arch-test-backend-registration-and-lookup ()
