@@ -17,8 +17,9 @@
 `package-archive-contents' bound to AVAILABLE, both alists of
 \(name . (package-desc)) shaped like the real package.el tables."
   (declare (indent 2))
-  `(let ((package-alist ,installed)
-         (package-archive-contents ,available))
+  `(cl-letf (((symbol-function 'arch-elpa--ensure-initialized) #'ignore)
+             (package-alist ,installed)
+             (package-archive-contents ,available))
      ,@body))
 
 (defun arch-elpa-test--desc (version &optional archive summary)
