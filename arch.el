@@ -1161,7 +1161,7 @@ lookup used by the package list view."
     ("S"  "Search AUR"           arch-search-aur)
     ("p"  "Find package"         arch-find-package)
     ("l"  "Package list"         arch-list)
-    ("b"  "Switch buffer"        arch-switch-to-buffer)
+    ("o"  "Switch buffer"        arch-switch-to-buffer)
     ("ki" "Kill buffers"         arch-kill-buffers)
     ("q"  "Quit"                 quit-window)]])
 
@@ -1809,7 +1809,7 @@ Rebuilds without pulling; use `arch-list-abs-install' to update the source first
     ("s"   "Search"          arch-search)
     ("S"   "Search AUR"      arch-search-aur)
     ("g"   "Refresh"         arch-list-refresh)
-    ("b"   "Switch buffer"   arch-switch-to-buffer)]
+    ("o"   "Switch buffer"   arch-switch-to-buffer)]
    ["System"
     ("y"  "Sync databases"       arch-sync)
     ("xf" "Force sync databases" arch-sync-force)
