@@ -92,7 +92,7 @@ With a prefix argument, always prompt regardless of this setting."
   :group 'arch)
 
 (defcustom arch-bury-progress-buffers nil
-  "When non-nil, keep progress buffers buried upon creation rather than displaying them."
+  "When non-nil, keep progress buffers buried rather than displaying them."
   :type 'boolean
   :group 'arch)
 
@@ -245,7 +245,7 @@ actually populated\".")
   (message "arch: cache reloaded (%d packages)" (hash-table-count arch--info-cache)))
 
 (defun arch--pacman-populate-cache ()
-  "Populate the info cache from `pacman -Qi', cross-referencing `pacman -Sl' for repo."
+  "Populate info cache from `pacman -Qi', referencing `pacman -Sl' for repo."
   (let ((repo-index
          (map-into
           (seq-map (lambda (pkg) (cons (arch-pkg-name pkg) (arch-pkg-repo pkg)))
@@ -369,7 +369,7 @@ commands accumulate output in the buffer."
 
 (defun arch--pkg-run (pkg-name args &optional op pkg)
   "Run ARGS in PKG-NAME's dedicated buffer, appending to existing content.
-OP is the operation type symbol ('install, 'upgrade, 'remove, 'upgrade-all).
+OP is operation type symbol (\='install, \='upgrade, \='remove, \='upgrade-all).
 PKG is an optional `arch-pkg' struct or package name."
   (let ((buf (arch--pkg-buffer pkg-name)))
     (arch--init-install-buffer buf)
@@ -618,7 +618,7 @@ Lines not matching this format (warnings, blank lines) are skipped."
   (arch--parse-search-output (arch--run-sync (list "yay" "--sync" "--search" query))))
 
 (defun arch--yay-search-aur (query)
-  "Search the AUR only for QUERY via `yay --sync --search --aur'; return list of arch-pkg."
+  "Search AUR only for QUERY via `yay'; return list of arch-pkg."
   (arch--parse-search-output (arch--run-sync (list "yay" "--sync" "--search" "--aur" query))))
 
 (defun arch--pacman-info (pkg-name)
@@ -744,14 +744,14 @@ versions, so upgrading those requires rebuilding individually via
 
 ;;;###autoload
 (defun arch-sync-force ()
-  "Force re-download of all package databases (`pacman --sync --refresh --refresh')."
+  "Force re-download of all package databases (`pacman -Syy')."
   (interactive)
   (arch--pkg-run "pacman" (list "sudo" "pacman" "--noconfirm" "--noprogressbar"
                                 "--sync" "--refresh" "--refresh")))
 
 ;;;###autoload
 (defun arch-upgrade-system ()
-  "Upgrade installed packages without syncing databases (`pacman --sync --sysupgrade')."
+  "Upgrade installed packages without syncing databases (`pacman -Su')."
   (interactive)
   (when (yes-or-no-p "Upgrade system without syncing databases? ")
     (arch--pkg-run "pacman"
@@ -810,7 +810,7 @@ Registered as the AUR backend's `abs-rebuild-fn'; called via `arch-abs-rebuild'.
 
 ;;;###autoload
 (defun arch-abs-install (pkg-name)
-  "Install or upgrade PKG-NAME from AUR source via `arch-aur-backend's abs-install-fn."
+  "Install or upgrade PKG-NAME from AUR via `arch-aur-backend' abs-install-fn."
   (interactive "sAUR package name: ")
   (funcall (or (arch-backend-abs-install-fn (arch--aur-backend))
               (user-error "Backend %S does not support AUR source installs"
@@ -819,7 +819,7 @@ Registered as the AUR backend's `abs-rebuild-fn'; called via `arch-abs-rebuild'.
 
 ;;;###autoload
 (defun arch-abs-rebuild (pkg-name)
-  "Rebuild PKG-NAME from its existing AUR source clone via `arch-aur-backend's abs-rebuild-fn."
+  "Rebuild PKG-NAME from existing AUR clone via `arch-aur-backend' abs-rebuild-fn."
   (interactive "sAUR package name: ")
   (funcall (or (arch-backend-abs-rebuild-fn (arch--aur-backend))
               (user-error "Backend %S does not support AUR source rebuilds"
@@ -953,7 +953,7 @@ Requires `arch-aur-backend' to support AUR-only search."
 ;;;###autoload
 (defun arch-find-package ()
   "ACR-select from all sync-DB packages and open arch-info.
-Annotation mirrors the package list columns: [repo]  Stat  (version)  description."
+Annotation mirrors columns: [repo]  Stat  (version)  description."
   (interactive)
   (unless arch--cache-populated-p
     (arch--populate-cache))
@@ -1179,7 +1179,7 @@ lookup used by the package list view."
 
 ;;;###autoload
 (defun arch-kill-progress-buffers ()
-  "Kill all *arch:<pkg>* and the shared worker install/build/upgrade progress buffers.
+  "Kill all *arch:<pkg>* and shared worker progress buffers.
 Buffers with a still-running process are left alone."
   (interactive)
   (let ((killed 0) (skipped 0))
@@ -1203,7 +1203,7 @@ See `arch-kill-progress-buffers' and `arch-kill-info-buffers'."
   (arch-kill-info-buffers))
 
 (defun arch-info-install ()
-  "Install the package shown in this buffer, selecting method via `arch--install-dispatch'.
+  "Install package shown in buffer, selecting method via `arch--install-dispatch'.
 If it is already installed, prompts to select a different package instead of
 reinstalling; use `arch-info-upgrade' to upgrade/reinstall it."
   (interactive)
@@ -1339,10 +1339,10 @@ Used to group candidates in `arch-switch-to-buffer'."
   "Full unfiltered tabulated-list entries for the current arch-list buffer.")
 
 (defvar-local arch--list-wide nil
-  "When non-nil, arch-list shows all sync-DB packages rather than only installed ones.")
+  "When non-nil, arch-list shows all sync-DB packages rather than installed only.")
 
 (defun arch--enrich-pkg (pkg foreign upgradeable)
-  "Set aur-p, upgradeable-p, explicit-p, required-by-p on PKG from context tables and cache."
+  "Set aur-p, upgradeable-p, explicit-p, and required-by-p on PKG from context."
   (let* ((name (arch-pkg-name pkg))
          (plist (arch--cache-get name))
          (req (when plist (plist-get plist 'required-by))))
@@ -1443,11 +1443,10 @@ MARKED is a hash table of marked package names."
 
 Columns: Name | Repo | Stat | Version | Description
   Repo: repository (core/extra/aur/…)
-  Stat: expl=explicit  E+req=explicit+required  dep=dependency  D+req=dep+required
-        orphn=orphaned dep  avail=not installed
+  Stat: expl=explicit, dep=dependency, req=required, avail=not installed
   Version: shown in bold red when an upgrade is available
 
-Marks: SPC toggles, m marks, DEL unmarks, M unmarks all.  Marked names appear bold.
+Marks: SPC toggles, m marks, DEL unmarks, M unmarks all.
 Filter: f to set, F to clear.  a for package actions menu.
 Wide mode: w toggles all-packages view (installed-only vs full sync DB).
 
@@ -1761,7 +1760,7 @@ Clones the abs directory if absent; otherwise pulls and rebuilds."
 
 (defun arch-list-abs-rebuild ()
   "Reinstall the package at point from its existing abs clone (`arch-abs-rebuild').
-Rebuilds without pulling; use `arch-list-abs-install' to update the source first."
+Rebuilds without pulling; use `arch-list-abs-install' to update source first."
   (interactive)
   (arch-abs-rebuild (arch-pkg-name (arch-list--pkg-at-point))))
 

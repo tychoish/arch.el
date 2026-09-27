@@ -11,7 +11,7 @@
 ;;; Commentary:
 ;; Export the packages explicitly installed on one machine to a portable
 ;; YAML file, carry it to another machine, and import it there.  Import
-;; cross-references the file against the local system in `arch-set-mode'
+;; cross-references the file against the local system in `arch-sets-mode'
 ;; and only installs missing packages on an explicit batch confirmation —
 ;; it never installs as a side effect of opening a file.
 
@@ -161,17 +161,17 @@ to review install status before installing anything."
                   (or (alist-get 'backend entry) "")))))
 
 (defvar-local arch-sets--file nil
-  "Path of the package-set file loaded into the current `arch-set-mode' buffer.")
+  "Path of the package-set file loaded into the current `arch-sets-mode' buffer.")
 
 (defvar-local arch-sets--entries nil
-  "Parsed package entries for the current `arch-set-mode' buffer.")
+  "Parsed package entries for the current `arch-sets-mode' buffer.")
 
-(defun arch-set--entry-at-point ()
+(defun arch-sets--entry-at-point ()
   "Return the package-set entry at point, or signal a `user-error'."
   (or (tabulated-list-get-id)
       (user-error "No package at point")))
 
-(defun arch-set-refresh ()
+(defun arch-sets-refresh ()
   "Recompute install status for the loaded package-set file against this system."
   (interactive)
   (let ((installed (arch-sets--installed-names)))
@@ -180,26 +180,26 @@ to review install status before installing anything."
                    arch-sets--entries))
     (tabulated-list-print t)))
 
-(defun arch-set-show-info ()
+(defun arch-sets-show-info ()
   "Show package info for the entry at point."
   (interactive)
-  (arch-show-info (alist-get 'name (arch-set--entry-at-point))))
+  (arch-show-info (alist-get 'name (arch-sets--entry-at-point))))
 
-(defun arch-set-install-at-point ()
+(defun arch-sets-install-at-point ()
   "Install the package at point if it is missing on this system."
   (interactive)
-  (let* ((entry (arch-set--entry-at-point))
+  (let* ((entry (arch-sets--entry-at-point))
          (name (alist-get 'name entry)))
     (when (arch-sets--entry-installed-p entry (arch-sets--installed-names))
       (user-error "%s is already installed" name))
     (when (yes-or-no-p (format "Install %s? " name))
       (arch-sets--install-entries (list entry))
-      (arch-set-refresh))))
+      (arch-sets-refresh))))
 
-(defun arch-set-install-missing ()
+(defun arch-sets-install-missing ()
   "Install every missing package in the loaded file, batched by backend.
 This is the one explicit confirmation step that installs anything —
-loading a file into `arch-set-mode' never installs on its own."
+loading a file into `arch-sets-mode' never installs on its own."
   (interactive)
   (let* ((installed (arch-sets--installed-names))
          (missing (or (seq-remove (lambda (e) (arch-sets--entry-installed-p e installed))
@@ -208,31 +208,31 @@ loading a file into `arch-set-mode' never installs on its own."
     (when (yes-or-no-p (format "Install %d missing package%s? "
                                (length missing) (if (= (length missing) 1) "" "s")))
       (arch-sets--install-entries missing)
-      (arch-set-refresh))))
+      (arch-sets-refresh))))
 
-(defvar arch-set-mode-map
+(defvar arch-sets-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
     map)
-  "Keymap for `arch-set-mode'.")
+  "Keymap for `arch-sets-mode'.")
 
-(define-key arch-set-mode-map (kbd "i")   #'arch-set-install-at-point)
-(define-key arch-set-mode-map (kbd "I")   #'arch-set-install-missing)
-(define-key arch-set-mode-map (kbd "g")   #'arch-set-refresh)
-(define-key arch-set-mode-map (kbd "RET") #'arch-set-show-info)
-(define-key arch-set-mode-map (kbd "l")   #'arch-list)
-(define-key arch-set-mode-map (kbd "K")   #'arch-kill-buffers)
-(define-key arch-set-mode-map (kbd "q")   #'quit-window)
-(define-key arch-set-mode-map (kbd "?")   #'arch-set-menu)
+(define-key arch-sets-mode-map (kbd "i")   #'arch-sets-install-at-point)
+(define-key arch-sets-mode-map (kbd "I")   #'arch-sets-install-missing)
+(define-key arch-sets-mode-map (kbd "g")   #'arch-sets-refresh)
+(define-key arch-sets-mode-map (kbd "RET") #'arch-sets-show-info)
+(define-key arch-sets-mode-map (kbd "l")   #'arch-list)
+(define-key arch-sets-mode-map (kbd "K")   #'arch-kill-buffers)
+(define-key arch-sets-mode-map (kbd "q")   #'quit-window)
+(define-key arch-sets-mode-map (kbd "?")   #'arch-sets-menu)
 
-(define-derived-mode arch-set-mode tabulated-list-mode "arch-set"
+(define-derived-mode arch-sets-mode tabulated-list-mode "arch-set"
   "Major mode for viewing a package-set file's install status.
 
 Columns: Name | Source | Status | Notes
   Status: installed / missing, cross-referenced against the live system.
   Notes: the `backend' field for `db'-sourced entries.
 
-\\{arch-set-mode-map}"
+\\{arch-sets-mode-map}"
   (setq tabulated-list-format
         (vector
          '("Name"    30 t)
@@ -242,33 +242,34 @@ Columns: Name | Source | Status | Notes
   (setq tabulated-list-sort-key '("Name" . nil))
   (tabulated-list-init-header))
 
-(transient-define-prefix arch-set-menu ()
+(transient-define-prefix arch-sets-menu ()
   "Actions for the arch package-set viewer buffer."
   [["Package"
-    ("i"   "Install at point" arch-set-install-at-point)
-    ("RET" "Show info"        arch-set-show-info)]
+    ("i"   "Install at point" arch-sets-install-at-point)
+    ("RET" "Show info"        arch-sets-show-info)]
    ["Batch"
-    ("I" "Install all missing" arch-set-install-missing)]
+    ("I" "Install all missing" arch-sets-install-missing)]
    ["View"
-    ("g" "Refresh"       arch-set-refresh)
+    ("g" "Refresh"       arch-sets-refresh)
     ("l" "Package list"  arch-list)
     ("K" "Kill buffers"  arch-kill-buffers)
     ("q" "Quit"          quit-window)]])
 
 ;;;###autoload
 (defun arch-sets-open-file (file)
-  "Load package-set FILE into `arch-set-mode', showing install status.
-Never installs anything on its own; use `arch-set-install-at-point' or
-`arch-set-install-missing' in the resulting buffer to do that."
+  "Load package-set FILE into `arch-sets-mode', showing install status.
+Never installs anything on its own; use `arch-sets-install-at-point' or
+`arch-sets-install-missing' in the resulting buffer to do that."
   (interactive (list (read-file-name "Open package set: " (arch-sets--directory))))
   (let ((entries (arch-sets--parse-file-packages file))
         (buf (get-buffer-create (format "*arch-set:%s*" (file-name-nondirectory file)))))
     (with-current-buffer buf
-      (arch-set-mode)
+      (arch-sets-mode)
       (setq arch-sets--file file)
       (setq arch-sets--entries entries)
-      (arch-set-refresh))
+      (arch-sets-refresh))
     (pop-to-buffer buf)))
+
 
 (provide 'arch-sets)
 ;;; arch-sets.el ends here
