@@ -25,6 +25,7 @@
 (require 'ansi-color)
 (require 'compile)
 (require 'comint)
+(require 'help-mode)
 (require 'tabulated-list)
 (require 'transient)
 (require 'annotated-completing-read)
@@ -496,8 +497,8 @@ and build-percentage output), and auto-scrolling displaying windows."
           (set-marker (process-mark proc) (point-max))
           (dolist (win (get-buffer-window-list buf nil t))
             (set-window-point win (point-max)))))))
-  (when-let* ((_ (and (eq (process-status proc) 'exit)
-                      (zerop (process-exit-status proc))))
+  (when-let* (((and (eq (process-status proc) 'exit)
+                     (zerop (process-exit-status proc))))
               (op (process-get proc 'arch-op))
               (pkgs (or (process-get proc 'arch-pkgs) '(nil))))
     (pcase op
@@ -1082,7 +1083,7 @@ lookup used by the package list view."
     (seq-do
      (lambda (field)
        (when-let* ((val (plist-get plist (cadr field)))
-                   (_ (not (equal val "None"))))
+                   ((not (equal val "None"))))
          (cond
             ((caddr field)
              (arch--yaml-insert-list (car field) (arch--yaml-split val)))
@@ -1115,9 +1116,9 @@ lookup used by the package list view."
       (with-current-buffer standard-output
         (setq arch--info-package pkg-name)
         (setq arch--info-aur-p (arch--pkg-aur-source-p pkg-name))
-        (when-let* ((_ arch--info-aur-p)
+        (when-let* ((arch--info-aur-p)
                     (pkg-dir (arch--aur-abs-pkg-dir pkg-name))
-                    (_ (file-directory-p pkg-dir)))
+                    ((file-directory-p pkg-dir)))
           (setq default-directory pkg-dir))
         (arch--info-render pkg-name plist files)
         (goto-char (point-min))))
@@ -1749,7 +1750,7 @@ Useful for AUR stub entries (version \"<aur>\") added by the widened list."
   "Upgrade all packages via the current backend."
   (interactive)
   (when-let* ((fn (arch-backend-upgrade-all-fn (or arch--list-backend (arch--default-backend))))
-              (_ (yes-or-no-p "Upgrade all packages? ")))
+              ((yes-or-no-p "Upgrade all packages? ")))
     (funcall fn)))
 
 (defun arch-list-abs-install ()
@@ -1923,7 +1924,7 @@ Rebuilds without pulling; use `arch-list-abs-install' to update source first."
   "Upgrade all packages via the default (pacman) backend."
   (interactive)
   (when-let* ((fn (arch-backend-upgrade-all-fn (arch--default-backend)))
-              (_ (yes-or-no-p "Upgrade all packages? ")))
+              ((yes-or-no-p "Upgrade all packages? ")))
     (funcall fn)))
 
 ;;;###autoload
@@ -1933,7 +1934,7 @@ AUR/foreign packages are not upgraded; a warning is logged.  Rebuild those
 individually via `arch-abs-install'."
   (interactive)
   (when-let* ((fn (arch-backend-upgrade-all-fn (arch--aur-backend)))
-              (_ (yes-or-no-p "Upgrade all packages (AUR packages will not be upgraded)? ")))
+              ((yes-or-no-p "Upgrade all packages (AUR packages will not be upgraded)? ")))
     (funcall fn)))
 
 ;;; Backend registration
