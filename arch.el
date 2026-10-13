@@ -1158,8 +1158,8 @@ lookup used by the package list view."
     ("br" "Reinstall (no pull)" arch-info-abs-rebuild
      :inapt-if-nil arch--info-aur-p)]
    ["Navigate"
-    ("s"  "Search"               arch-search)
-    ("S"  "Search AUR"           arch-search-aur)
+    ("ss" "Search"               arch-search)
+    ("sa" "Search AUR"           arch-search-aur)
     ("p"  "Find package"         arch-find-package)
     ("l"  "Package list"         arch-list)
     ("o"  "Switch buffer"        arch-switch-to-buffer)
@@ -1791,23 +1791,23 @@ Rebuilds without pulling; use `arch-list-abs-install' to update source first."
      :inapt-if-not arch-list--pkg-at-point-p)]
    ["Marked"
     ("SPC" "Toggle mark"     arch-list-toggle-mark)
-    ("m"   "Mark"            arch-list-mark)
+    ("mm"  "Mark"            arch-list-mark)
     ("DEL" "Unmark"          arch-list-unmark)
-    ("xu"  "Unmark all"      arch-list-unmark-all)
+    ("mc"  "Unmark all"      arch-list-unmark-all)
     ("xi"  "Install marked"  arch-list-install-marked)
     ("xr"  "Remove marked"   arch-list-remove-marked)]
    ["View"
     ("RET" "Package info"    arch-list-show-info
      :inapt-if-not arch-list--pkg-at-point-p)
-    ("I"   "Fetch info"      arch-list-fetch-info
+    ("fi"  "Fetch info"      arch-list-fetch-info
      :inapt-if-not arch-list--pkg-at-point-p)
     ("p"   "Find package"    arch-find-package)
     ("/"   "Find in list"    arch-list-find)
-    ("w"   "Toggle wide"     arch-list-toggle-wide)
-    ("f"   "Filter"          arch-list-filter)
-    ("xc"  "Clear filter"    arch-list-filter-clear)
-    ("s"   "Search"          arch-search)
-    ("S"   "Search AUR"      arch-search-aur)
+    ("tc"  "Toggle wide"     arch-list-toggle-wide)
+    ("fs"  "Filter"          arch-list-filter)
+    ("fc"  "Clear filter"    arch-list-filter-clear)
+    ("ss"  "Search"          arch-search)
+    ("sa"  "Search AUR"      arch-search-aur)
     ("g"   "Refresh"         arch-list-refresh)
     ("o"   "Switch buffer"   arch-switch-to-buffer)]
    ["System"
@@ -1820,8 +1820,8 @@ Rebuilds without pulling; use `arch-list-abs-install' to update source first."
 (transient-define-prefix arch-dispatch ()
   "Entry point for Arch Linux package management."
   [["Search"
-    ("s"  "Search"      arch-search)
-    ("S"  "Search AUR"  arch-search-aur)]
+    ("ss" "Search"      arch-search)
+    ("sa" "Search AUR"  arch-search-aur)]
    ["View"
     ("l"  "List installed"    arch-list)
     ("fp" "Find package"      arch-find-package)
