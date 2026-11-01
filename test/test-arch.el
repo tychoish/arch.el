@@ -747,5 +747,53 @@ output does."
               (should-not (string-match-p "a: 1%a: 50%" (buffer-string))))))
       (kill-buffer buf))))
 
+;;; Dependency graph tests
+
+(ert-deftest arch-test-depgraph-build-and-queries ()
+  "arch-depgraph-build creates forward and reverse dependency maps."
+  (let* ((pkgs '(alpha beta gamma delta))
+         (deps-table #s(hash-table size 4 test equal data (alpha (beta gamma) beta (gamma) gamma nil delta nil)))
+         (graph (arch-depgraph-build 'test pkgs (lambda (p) (gethash p deps-table)))))
+    (should (equal (arch-depgraph-dependencies graph 'alpha) '(beta gamma)))
+    (should (equal (arch-depgraph-dependents graph 'gamma) '(alpha beta)))
+    (should (equal (arch-depgraph-zero-dependencies graph) '(delta gamma)))
+    (should (equal (arch-depgraph-zero-dependents graph) '(alpha delta)))))
+
+(ert-deftest arch-test-depgraph-transitive-and-cycle-safe ()
+  "Transitive queries traverse reachable nodes and terminate on cycles."
+  (let* ((pkgs '(a b c))
+         (deps-table #s(hash-table size 3 test equal data (a (b) b (c) c (a))))
+         (graph (arch-depgraph-build 'cycle pkgs (lambda (p) (gethash p deps-table)))))
+    (should (equal (arch-depgraph-dependencies graph 'a t) '(a b c)))
+    (should (equal (arch-depgraph-dependents graph 'a t) '(a b c)))))
+
+(ert-deftest arch-test-depgraph-deps-of-dependents ()
+  "arch-depgraph-deps-of-dependents gathers dependencies of all dependents."
+  (let* ((pkgs '(root app1 app2 helper1 helper2))
+         (deps-table #s(hash-table size 5 test equal
+                                   data (app1 (root helper1)
+                                         app2 (root helper2)
+                                         root nil
+                                         helper1 nil
+                                         helper2 nil)))
+         (graph (arch-depgraph-build 'tree pkgs (lambda (p) (gethash p deps-table)))))
+    ;; app1 and app2 depend on root.
+    ;; The dependencies of app1 and app2 are: (root helper1) and (root helper2).
+    ;; Excluding root itself, deps-of-dependents for root is (helper1 helper2).
+    (should (equal (arch-depgraph-deps-of-dependents graph 'root) '(helper1 helper2)))))
+
+(ert-deftest arch-test-depgraph-cache-and-clear ()
+  "arch-depgraph-get caches graphs and arch-depgraph-clear evicts them."
+  (let ((arch-depgraph--cache (make-hash-table :test #'equal))
+        (calls 0))
+    (let ((b-fn (lambda () (cl-incf calls) (arch-depgraph-build 'd1 '(x) (lambda (_) nil)))))
+      (should (arch-depgraph-get 'd1 b-fn))
+      (should (= calls 1))
+      (should (arch-depgraph-get 'd1 b-fn))
+      (should (= calls 1))
+      (arch-depgraph-clear 'd1)
+      (should (arch-depgraph-get 'd1 b-fn))
+      (should (= calls 2)))))
+
 (provide 'arch-test)
 ;;; arch-test.el ends here

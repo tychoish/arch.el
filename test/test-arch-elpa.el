@@ -22,11 +22,13 @@
              (package-archive-contents ,available))
      ,@body))
 
-(defun arch-elpa-test--desc (version &optional archive summary)
-  "Build a `package-desc' with VERSION (a string), ARCHIVE, and SUMMARY."
+(defun arch-elpa-test--desc (version &optional archive summary reqs dir)
+  "Build a `package-desc' with VERSION (a string), ARCHIVE, SUMMARY, REQS, and DIR."
   (package-desc-create :version (version-to-list version)
                        :archive archive
-                       :summary summary))
+                       :summary summary
+                       :reqs reqs
+                       :dir dir))
 
 (ert-deftest arch-elpa-test-pkg-for-name-installed-up-to-date ()
   "arch-elpa--pkg-for-name reports an installed, non-upgradeable package."
@@ -119,6 +121,95 @@
   (with-temp-buffer
     (arch-elpa-list-mode)
     (should-error (arch-elpa--pkg-at-point) :type 'user-error)))
+
+;;; Dependency graph and view tests
+
+(ert-deftest arch-elpa-test-package-dependencies-analysis ()
+  "arch-elpa-package-dependencies computes dependencies and reverse dependents."
+  (let* ((user-dir "/test/elpa/")
+         (bar-desc (arch-elpa-test--desc "1.0" "melpa" "bar pkg" nil "/test/elpa/bar-1.0"))
+         (foo-desc (arch-elpa-test--desc "2.0" "melpa" "foo pkg" '((bar (1 0)) (emacs (29 1))) "/test/elpa/foo-2.0"))
+         (baz-desc (arch-elpa-test--desc "1.5" "gnu" "baz pkg" '((bar (1 0))) "/test/elpa/baz-1.5"))
+         (installed `((bar . (,bar-desc))
+                      (foo . (,foo-desc))
+                      (baz . (,baz-desc)))))
+    (let ((package-user-dir user-dir))
+      (arch-elpa-test--with-package-state installed nil
+        (arch-depgraph-clear 'elpa)
+        (let ((bar-info (arch-elpa-package-dependencies 'bar))
+              (foo-info (arch-elpa-package-dependencies 'foo))
+              (all-info (arch-elpa-package-dependencies)))
+          ;; bar has no dependencies, but is required by baz and foo
+          (should (null (plist-get bar-info :dependencies)))
+          (should (equal (plist-get bar-info :dependents) '(baz foo)))
+          (should (plist-get bar-info :zero-dependencies-p))
+          (should-not (plist-get bar-info :zero-dependents-p))
+
+          ;; foo depends on bar, but nothing depends on foo
+          (should (equal (plist-get foo-info :dependencies) '(bar)))
+          (should (null (plist-get foo-info :dependents)))
+          (should-not (plist-get foo-info :zero-dependencies-p))
+          (should (plist-get foo-info :zero-dependents-p))
+
+          ;; all-info contains analysis for all installed packages
+          (should (= (length all-info) 3))
+          (should (assq 'bar all-info))
+          (should (assq 'foo all-info))
+          (should (assq 'baz all-info)))))))
+
+(ert-deftest arch-elpa-test-filter-zero-dependencies-and-dependents ()
+  "Filter predicates correctly classify zero-dependencies and zero-dependents packages."
+  (let* ((user-dir "/test/elpa/")
+         (bar-desc (arch-elpa-test--desc "1.0" "melpa" "bar pkg" nil "/test/elpa/bar-1.0"))
+         (foo-desc (arch-elpa-test--desc "2.0" "melpa" "foo pkg" '((bar (1 0))) "/test/elpa/foo-2.0"))
+         (installed `((bar . (,bar-desc))
+                      (foo . (,foo-desc)))))
+    (let ((package-user-dir user-dir))
+      (arch-elpa-test--with-package-state installed nil
+        (arch-depgraph-clear 'elpa)
+        (let ((bar-pkg (arch-elpa--pkg-for-name 'bar))
+              (foo-pkg (arch-elpa--pkg-for-name 'foo)))
+          (should (arch-elpa--filter-zero-dependencies-p bar-pkg))
+          (should-not (arch-elpa--filter-zero-dependencies-p foo-pkg))
+          (should-not (arch-elpa--filter-zero-dependents-p bar-pkg))
+          (should (arch-elpa--filter-zero-dependents-p foo-pkg)))))))
+
+(ert-deftest arch-elpa-test-deps-of-dependents-computation ()
+  "Dependencies of dependents correctly computed for elpa packages."
+  (let* ((user-dir "/test/elpa/")
+         (core-desc (arch-elpa-test--desc "1.0" "melpa" "core" nil "/test/elpa/core-1.0"))
+         (extra-desc (arch-elpa-test--desc "1.0" "melpa" "extra" nil "/test/elpa/extra-1.0"))
+         (app-desc (arch-elpa-test--desc "1.0" "melpa" "app" '((core (1 0)) (extra (1 0))) "/test/elpa/app-1.0"))
+         (installed `((core . (,core-desc))
+                      (extra . (,extra-desc))
+                      (app . (,app-desc)))))
+    (let ((package-user-dir user-dir))
+      (arch-elpa-test--with-package-state installed nil
+        (arch-depgraph-clear 'elpa)
+        (let ((core-info (arch-elpa-package-dependencies 'core)))
+          ;; app depends on core and extra. Thus extra is in deps-of-dependents of core.
+          (should (equal (plist-get core-info :deps-of-dependents) '(extra))))))))
+
+(ert-deftest arch-elpa-test-show-info-buffer-rendering ()
+  "arch-elpa-show-info creates and renders package details buffer."
+  (let* ((user-dir "/test/elpa/")
+         (pkg-desc (arch-elpa-test--desc "1.2.3" "melpa" "Sample pkg" nil "/test/elpa/sample-1.2.3"))
+         (installed `((sample . (,pkg-desc)))))
+    (let ((package-user-dir user-dir))
+      (arch-elpa-test--with-package-state installed nil
+        (arch-depgraph-clear 'elpa)
+        (arch-elpa-show-info 'sample)
+        (let ((buf (get-buffer "*arch-elpa-info<sample>*")))
+          (should (buffer-live-p buf))
+          (with-current-buffer buf
+            (should (eq major-mode 'arch-elpa-info-mode))
+            (let ((str (buffer-string)))
+              (should (string-match-p "name: sample" str))
+              (should (string-match-p "version: 1.2.3" str))
+              (should (string-match-p "status: installed" str))
+              (should (string-match-p "zero-dependencies: true" str))
+              (should (string-match-p "zero-dependents: true" str))))
+          (kill-buffer buf))))))
 
 (provide 'arch-elpa-test)
 ;;; arch-elpa-test.el ends here
