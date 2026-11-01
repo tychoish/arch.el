@@ -51,11 +51,11 @@ internally via `package--archives-initialize'."
   (car (map-elt package-alist name)))
 
 (defun arch-elpa--available-desc (name)
-  "Return the best available `package-desc' for NAME from archive contents, or nil."
+  "Return best available `package-desc' for NAME from archive, or nil."
   (car (map-elt package-archive-contents name)))
 
 (defun arch-elpa--upgradeable-p (name)
-  "Return non-nil if NAME has an installed version older than the available one."
+  "Return non-nil if NAME has an installed version older than available."
   (when-let* ((installed (arch-elpa--installed-desc name))
               (available (arch-elpa--available-desc name)))
     (version-list-< (package-desc-version installed) (package-desc-version available))))
@@ -218,7 +218,7 @@ Wide mode: w toggles all-packages view (installed-only vs installed+available).
 ;;; Dependency analysis & driver graph
 
 (defun arch-elpa--installed-third-party-names ()
-  "Return a list of symbols for all third-party packages installed in `package-user-dir'."
+  "Return list of symbols for third-party packages in `package-user-dir'."
   (arch-elpa--ensure-initialized)
   (let ((user-dir (and package-user-dir (file-name-as-directory (expand-file-name package-user-dir))))
         (names nil))
@@ -256,7 +256,7 @@ When FORCE is non-nil, rebuild the graph from current `package.el' state."
 
 ;;;###autoload
 (defun arch-elpa-package-dependencies (&optional pkg-name force)
-  "Find installed third-party packages and list their dependencies and dependents.
+  "Find installed packages and list their dependencies and dependents.
 When PKG-NAME is non-nil (symbol or string), return a plist of dependency
 analysis for that package:
   (:package               PKG-NAME (symbol)
@@ -407,7 +407,7 @@ dependency summary in the echo area (or show info with prefix argument)."
   (tabulated-list-get-id))
 
 (defun arch-elpa--select-package (prompt &optional pkgs)
-  "ACR-select an elpa package with PROMPT; return the selected name string or nil.
+  "ACR-select an elpa package with PROMPT; return selected name or nil.
 PKGS restricts the candidate set; defaults to all known packages."
   (let* ((pkgs (or pkgs (seq-map #'arch-elpa--pkg-for-name (arch-elpa--all-names))))
          (index (map-into (seq-map (lambda (p) (cons (symbol-name (arch-elpa-pkg-name p)) p)) pkgs)
@@ -515,7 +515,7 @@ If TARGET-PKG is nil, prompt with ACR."
 
 ;;;###autoload
 (defun arch-elpa-list-upgrade-all ()
-  "Upgrade all elisp packages with an available upgrade via `package-upgrade-all'."
+  "Upgrade all packages with an available upgrade via `package-upgrade-all'."
   (interactive)
   (when (yes-or-no-p "Upgrade all elisp packages? ")
     (package-upgrade-all)

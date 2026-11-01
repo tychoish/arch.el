@@ -341,7 +341,7 @@ EXTRA is an optional plist of driver metadata."
      :extra extra)))
 
 (defun arch--depgraph-walk (table start-node)
-  "Walk adjacency TABLE starting from START-NODE, returning all reachable nodes."
+  "Walk adjacency TABLE from START-NODE, returning all reachable nodes."
   (let ((visited (make-hash-table :test #'equal))
         (queue (copy-sequence (gethash start-node table nil)))
         (result nil))
@@ -607,7 +607,7 @@ and build-percentage output), and auto-scrolling displaying windows."
               (set-window-point win (point-max)))))))))
 
 (defun arch--pkg-sentinel (proc event)
-  "Append completion notice for PROC to its buffer and run post-operation hooks."
+  "Append completion notice for PROC and run post-operation hooks."
   (let ((status (process-status proc))
         (exit-code (process-exit-status proc))
         (buf (process-buffer proc)))
@@ -924,7 +924,7 @@ versions, so upgrading those requires rebuilding individually via
 
 (defun arch--aur-abs-install (pkg-name &optional pkg)
   "Install PKG-NAME from AUR: clone to abs dir, then run makepkg -sfi.
-Registered as the AUR backend's `abs-install-fn'; called via `arch-abs-install'."
+Registered as AUR backend's `abs-install-fn'; called via `arch-abs-install'."
   (make-directory arch-abs-directory t)
   (let* ((pkg-dir (arch--aur-abs-pkg-dir pkg-name))
          (fetch-cmd (if (file-directory-p pkg-dir)
@@ -942,7 +942,7 @@ Registered as the AUR backend's `abs-install-fn'; called via `arch-abs-install'.
 
 (defun arch--aur-abs-rebuild (pkg-name &optional pkg)
   "Rebuild PKG-NAME in its existing abs directory without pulling.
-Registered as the AUR backend's `abs-rebuild-fn'; called via `arch-abs-rebuild'."
+Registered as AUR backend's `abs-rebuild-fn'; called via `arch-abs-rebuild'."
   (let ((pkg-dir (arch--aur-abs-pkg-dir pkg-name)))
     (unless (file-directory-p pkg-dir)
       (user-error "No abs directory for %s; use arch-abs-install first" pkg-name))
@@ -964,7 +964,7 @@ Registered as the AUR backend's `abs-rebuild-fn'; called via `arch-abs-rebuild'.
 
 ;;;###autoload
 (defun arch-abs-rebuild (pkg-name)
-  "Rebuild PKG-NAME from existing AUR clone via `arch-aur-backend' abs-rebuild-fn."
+  "Rebuild PKG-NAME from AUR clone via `arch-aur-backend' abs-rebuild-fn."
   (interactive "sAUR package name: ")
   (funcall (or (arch-backend-abs-rebuild-fn (arch--aur-backend))
               (user-error "Backend %S does not support AUR source rebuilds"
@@ -1247,6 +1247,25 @@ lookup used by the package list view."
     (when files
       (arch--yaml-insert-list "files" files))))
 
+(defvar arch-info-map
+  (make-sparse-keymap)
+  "Keymap for arch info help buffers.  Inherits `help-mode-map' once loaded.")
+
+(with-eval-after-load 'help-mode
+  (set-keymap-parent arch-info-map help-mode-map))
+
+(define-key arch-info-map (kbd "q") #'quit-window)
+(define-key arch-info-map (kbd "i") #'arch-info-install)
+(define-key arch-info-map (kbd "r") #'arch-info-remove)
+(define-key arch-info-map (kbd "u") #'arch-info-upgrade)
+(define-key arch-info-map (kbd "s") #'arch-search)
+(define-key arch-info-map (kbd "S") #'arch-search-aur)
+(define-key arch-info-map (kbd "l") #'arch-list)
+(define-key arch-info-map (kbd "p") #'arch-find-package)
+(define-key arch-info-map (kbd "K") #'arch-kill-buffers)
+(define-key arch-info-map (kbd "b") #'arch-switch-to-buffer)
+(define-key arch-info-map (kbd "?") #'arch-info-menu)
+
 ;;;###autoload
 (defun arch-show-info (pkg-name)
   "Display detailed info for PKG-NAME in a read-only buffer."
@@ -1270,24 +1289,6 @@ lookup used by the package list view."
       (with-current-buffer buf
         (use-local-map arch-info-map)))))
 
-(defvar arch-info-map
-  (make-sparse-keymap)
-  "Keymap for arch info help buffers.  Inherits `help-mode-map' once loaded.")
-
-(with-eval-after-load 'help-mode
-  (set-keymap-parent arch-info-map help-mode-map))
-
-(define-key arch-info-map (kbd "q") #'quit-window)
-(define-key arch-info-map (kbd "i") #'arch-info-install)
-(define-key arch-info-map (kbd "r") #'arch-info-remove)
-(define-key arch-info-map (kbd "u") #'arch-info-upgrade)
-(define-key arch-info-map (kbd "s") #'arch-search)
-(define-key arch-info-map (kbd "S") #'arch-search-aur)
-(define-key arch-info-map (kbd "l") #'arch-list)
-(define-key arch-info-map (kbd "p") #'arch-find-package)
-(define-key arch-info-map (kbd "K") #'arch-kill-buffers)
-(define-key arch-info-map (kbd "b") #'arch-switch-to-buffer)
-(define-key arch-info-map (kbd "?") #'arch-info-menu)
 
 (transient-define-prefix arch-info-menu ()
   "Actions for the arch package info buffer."
@@ -1348,7 +1349,7 @@ See `arch-kill-progress-buffers' and `arch-kill-info-buffers'."
   (arch-kill-info-buffers))
 
 (defun arch-info-install ()
-  "Install package shown in buffer, selecting method via `arch--install-dispatch'.
+  "Install package in buffer, selecting method via `arch--install-dispatch'.
 If it is already installed, prompts to select a different package instead of
 reinstalling; use `arch-info-upgrade' to upgrade/reinstall it."
   (interactive)
@@ -1389,7 +1390,7 @@ See `arch-abs-rebuild'."
 ;; than popping a new one, but never displace the arch package list window
 
 (defun arch--progress-buffer-p (buf _action)
-  "Return non-nil if BUF is an *arch:<pkg>* or the shared worker progress buffer.
+  "Return non-nil if BUF is *arch:<pkg>* or the shared worker buffer.
 BUF may be a buffer or a buffer name, per the `display-buffer-alist'
 condition-function contract."
   (let ((name (if (bufferp buf) (buffer-name buf) buf)))
@@ -1818,7 +1819,7 @@ falls back to `arch--install-dispatch' per package."
       (seq-do (lambda (name) (funcall fn name)) names))))
 
 (defun arch-list-find ()
-  "Jump to a package in the current list using ACR with table-column annotations."
+  "Jump to package in list using ACR with table-column annotations."
   (interactive)
   (let* ((pkg-index (map-into
                      (seq-map (lambda (e) (cons (arch-pkg-name (car e)) (car e)))
@@ -1904,7 +1905,7 @@ Clones the abs directory if absent; otherwise pulls and rebuilds."
   (arch-abs-install (arch-pkg-name (arch-list--pkg-at-point))))
 
 (defun arch-list-abs-rebuild ()
-  "Reinstall the package at point from its existing abs clone (`arch-abs-rebuild').
+  "Reinstall package at point from existing abs clone (`arch-abs-rebuild').
 Rebuilds without pulling; use `arch-list-abs-install' to update source first."
   (interactive)
   (arch-abs-rebuild (arch-pkg-name (arch-list--pkg-at-point))))
@@ -1996,7 +1997,7 @@ Rebuilds without pulling; use `arch-list-abs-install' to update source first."
 
 ;;;###autoload
 (defun arch-install (pkg-name)
-  "Install PKG-NAME via the default backend, selecting via ACR when interactive."
+  "Install PKG-NAME via default backend, selecting via ACR when interactive."
   (interactive
    (let* ((backend (arch--default-backend))
           (pkgs (if-let* ((fn (arch-backend-list-all-fn backend)))
@@ -2041,7 +2042,7 @@ Rebuilds without pulling; use `arch-list-abs-install' to update source first."
 
 ;;;###autoload
 (defun arch-upgrade (pkg-name)
-  "Upgrade PKG-NAME via the default backend, selecting via ACR when interactive."
+  "Upgrade PKG-NAME via default backend, selecting via ACR when interactive."
   (interactive
    (progn
      (unless arch--cache-populated-p
