@@ -135,33 +135,30 @@ Union of installed packages and packages available from configured archives."
            (arch-elpa-pkg-version pkg))
          (arch-elpa-pkg-summary pkg))))
 
-(defvar arch-elpa-list-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map tabulated-list-mode-map)
-    map)
-  "Keymap for `arch-elpa-list-mode'.")
-
-(define-key arch-elpa-list-mode-map (kbd "i")   #'arch-elpa-list-install)
-(define-key arch-elpa-list-mode-map (kbd "a")   #'arch-elpa-list-actions)
-(define-key arch-elpa-list-mode-map (kbd "r")   #'arch-elpa-list-remove)
-(define-key arch-elpa-list-mode-map (kbd "u")   #'arch-elpa-list-upgrade)
-(define-key arch-elpa-list-mode-map (kbd "U")   #'arch-elpa-list-upgrade-all)
-(define-key arch-elpa-list-mode-map (kbd "f")   #'arch-elpa-list-filter)
-(define-key arch-elpa-list-mode-map (kbd "F")   #'arch-elpa-list-filter-clear)
-(define-key arch-elpa-list-mode-map (kbd "w")   #'arch-elpa-list-toggle-wide)
-(define-key arch-elpa-list-mode-map (kbd "s")   #'arch-elpa-search)
-(define-key arch-elpa-list-mode-map (kbd "/")   #'arch-elpa-list-find)
-(define-key arch-elpa-list-mode-map (kbd "SPC") #'arch-elpa-list-toggle-mark)
-(define-key arch-elpa-list-mode-map (kbd "m")   #'arch-elpa-list-mark)
-(define-key arch-elpa-list-mode-map (kbd "M")   #'arch-elpa-list-unmark-all)
-(define-key arch-elpa-list-mode-map (kbd "DEL") #'arch-elpa-list-unmark)
-(define-key arch-elpa-list-mode-map (kbd "D")     #'arch-elpa-search-deps-of-dependents)
-(define-key arch-elpa-list-mode-map (kbd "v g")   #'arch-elpa-list-view-deps-of-dependents)
-(define-key arch-elpa-list-mode-map (kbd "v d g") #'arch-elpa-list-view-deps-of-dependents)
-(define-key arch-elpa-list-mode-map (kbd "g")     #'arch-elpa-list-refresh)
-(define-key arch-elpa-list-mode-map (kbd "C")   #'arch-elpa-list-refresh-contents)
-(define-key arch-elpa-list-mode-map (kbd "RET") #'arch-elpa-list-show-info)
-(define-key arch-elpa-list-mode-map (kbd "?")   #'arch-elpa-list-menu)
+(defvar-keymap arch-elpa-list-mode-map
+  :doc "Keymap for `arch-elpa-list-mode'."
+  :parent tabulated-list-mode-map
+  "i"     #'arch-elpa-list-install
+  "a"     #'arch-elpa-list-actions
+  "r"     #'arch-elpa-list-remove
+  "u"     #'arch-elpa-list-upgrade
+  "U"     #'arch-elpa-list-upgrade-all
+  "f"     #'arch-elpa-list-filter
+  "F"     #'arch-elpa-list-filter-clear
+  "w"     #'arch-elpa-list-toggle-wide
+  "s"     #'arch-elpa-search
+  "/"     #'arch-elpa-list-find
+  "SPC"   #'arch-elpa-list-toggle-mark
+  "m"     #'arch-elpa-list-mark
+  "M"     #'arch-elpa-list-unmark-all
+  "DEL"   #'arch-elpa-list-unmark
+  "D"     #'arch-elpa-search-deps-of-dependents
+  "v g"   #'arch-elpa-list-view-deps-of-dependents
+  "v d g" #'arch-elpa-list-view-deps-of-dependents
+  "g"     #'arch-elpa-list-refresh
+  "C"     #'arch-elpa-list-refresh-contents
+  "RET"   #'arch-elpa-list-show-info
+  "?"     #'arch-elpa-list-menu)
 
 (define-derived-mode arch-elpa-list-mode tabulated-list-mode "arch-elpa"
   "Major mode for browsing and managing Emacs Lisp packages via `package.el'.
@@ -535,20 +532,18 @@ If TARGET-PKG is nil, prompt with ACR."
 (defvar-local arch-elpa--info-package nil
   "Package symbol displayed in the current arch-elpa-info buffer.")
 
-(defvar arch-elpa-info-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map help-mode-map)
-    (define-key map (kbd "q") #'quit-window)
-    (define-key map (kbd "d") #'arch-elpa-info-describe-package)
-    (define-key map (kbd "D") #'arch-elpa-info-search-deps-of-dependents)
-    (define-key map (kbd "i") #'arch-elpa-info-install)
-    (define-key map (kbd "r") #'arch-elpa-info-remove)
-    (define-key map (kbd "u") #'arch-elpa-info-upgrade)
-    (define-key map (kbd "s") #'arch-elpa-search)
-    (define-key map (kbd "l") #'arch-elpa-list)
-    (define-key map (kbd "?") #'arch-elpa-info-menu)
-    map)
-  "Keymap for `arch-elpa-info-mode'.")
+(defvar-keymap arch-elpa-info-mode-map
+  :doc "Keymap for `arch-elpa-info-mode'."
+  :parent help-mode-map
+  "q" #'quit-window
+  "d" #'arch-elpa-info-describe-package
+  "D" #'arch-elpa-info-search-deps-of-dependents
+  "i" #'arch-elpa-info-install
+  "r" #'arch-elpa-info-remove
+  "u" #'arch-elpa-info-upgrade
+  "s" #'arch-elpa-search
+  "l" #'arch-elpa-list
+  "?" #'arch-elpa-info-menu)
 
 (define-derived-mode arch-elpa-info-mode special-mode "arch-elpa-info"
   "Major mode for viewing detailed package information in arch-elpa.

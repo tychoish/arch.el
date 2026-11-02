@@ -210,20 +210,17 @@ loading a file into `arch-sets-mode' never installs on its own."
       (arch-sets--install-entries missing)
       (arch-sets-refresh))))
 
-(defvar arch-sets-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map tabulated-list-mode-map)
-    map)
-  "Keymap for `arch-sets-mode'.")
-
-(define-key arch-sets-mode-map (kbd "i")   #'arch-sets-install-at-point)
-(define-key arch-sets-mode-map (kbd "I")   #'arch-sets-install-missing)
-(define-key arch-sets-mode-map (kbd "g")   #'arch-sets-refresh)
-(define-key arch-sets-mode-map (kbd "RET") #'arch-sets-show-info)
-(define-key arch-sets-mode-map (kbd "l")   #'arch-list)
-(define-key arch-sets-mode-map (kbd "K")   #'arch-kill-buffers)
-(define-key arch-sets-mode-map (kbd "q")   #'quit-window)
-(define-key arch-sets-mode-map (kbd "?")   #'arch-sets-menu)
+(defvar-keymap arch-sets-mode-map
+  :doc "Keymap for `arch-sets-mode'."
+  :parent tabulated-list-mode-map
+  "i"   #'arch-sets-install-at-point
+  "I"   #'arch-sets-install-missing
+  "g"   #'arch-sets-refresh
+  "RET" #'arch-sets-show-info
+  "l"   #'arch-list
+  "K"   #'arch-kill-buffers
+  "q"   #'quit-window
+  "?"   #'arch-sets-menu)
 
 (define-derived-mode arch-sets-mode tabulated-list-mode "arch-set"
   "Major mode for viewing a package-set file's install status.
