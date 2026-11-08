@@ -2174,5 +2174,44 @@ individually via `arch-abs-install'."
     :abs-install-fn #'arch--aur-abs-install
     :abs-rebuild-fn #'arch--aur-abs-rebuild)))
 
+(declare-function alert "alert")
+
+;;;###autoload
+(defun arch-alert-after-install (pkg)
+  "Display desktop notification via `alert' after PKG install."
+  (when (fboundp 'alert)
+    (alert (format "Installed package %s" (arch-pkg-name pkg))
+           :title "Arch Package Manager")))
+
+;;;###autoload
+(defun arch-alert-after-upgrade (pkg)
+  "Display desktop notification via `alert' after PKG upgrade."
+  (when (fboundp 'alert)
+    (alert (format "Upgraded package %s" (arch-pkg-name pkg))
+           :title "Arch Package Manager")))
+
+;;;###autoload
+(defun arch-alert-after-remove (pkg)
+  "Display desktop notification via `alert' after PKG remove."
+  (when (fboundp 'alert)
+    (alert (format "Removed package %s" (arch-pkg-name pkg))
+           :title "Arch Package Manager")))
+
+;;;###autoload
+(defun arch-alert-after-upgrade-all ()
+  "Display desktop notification via `alert' after system upgrade."
+  (when (fboundp 'alert)
+    (alert "System upgrade completed"
+           :title "Arch Package Manager")))
+
+;;;###autoload
+(defun arch-enable-desktop-notifications ()
+  "Enable desktop notifications via `alert' for arch package operations."
+  (interactive)
+  (add-hook 'arch-after-install-hook #'arch-alert-after-install)
+  (add-hook 'arch-after-upgrade-hook #'arch-alert-after-upgrade)
+  (add-hook 'arch-after-remove-hook #'arch-alert-after-remove)
+  (add-hook 'arch-after-upgrade-all-hook #'arch-alert-after-upgrade-all))
+
 (provide 'arch)
 ;;; arch.el ends here
