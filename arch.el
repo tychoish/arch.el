@@ -1258,21 +1258,17 @@ lookup used by the package list view."
     (when files
       (arch--yaml-insert-list "files" files))))
 
-(defvar arch-info-map
-  (make-sparse-keymap)
-  "Keymap for arch info help buffers.  Inherits `help-mode-map' once loaded.")
-
-(with-eval-after-load 'help-mode
-  (set-keymap-parent arch-info-map help-mode-map))
-
-(define-key arch-info-map (kbd "q") #'quit-window)
-(define-key arch-info-map (kbd "i") #'arch-info-install)
-(define-key arch-info-map (kbd "r") #'arch-info-remove)
-(define-key arch-info-map (kbd "u") #'arch-info-upgrade)
-(define-key arch-info-map (kbd "s") #'arch-search)
-(define-key arch-info-map (kbd "S") #'arch-search-aur)
-(define-key arch-info-map (kbd "l") #'arch-list)
-(define-key arch-info-map (kbd "p") #'arch-find-package)
+(defvar-keymap arch-info-map
+  :doc "Keymap for arch info help buffers.  Inherits `help-mode-map'."
+  :parent help-mode-map
+  "q" #'quit-window
+  "i" #'arch-info-install
+  "r" #'arch-info-remove
+  "u" #'arch-info-upgrade
+  "s" #'arch-search
+  "S" #'arch-search-aur
+  "l" #'arch-list
+  "p" #'arch-find-package)
 (define-key arch-info-map (kbd "K") #'arch-kill-buffers)
 (define-key arch-info-map (kbd "b") #'arch-switch-to-buffer)
 (define-key arch-info-map (kbd "?") #'arch-info-menu)
