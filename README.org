@@ -209,10 +209,11 @@ Keybindings in ~arch-list-mode~:
 - ~r~: Remove package at point.
 - ~u~: Upgrade package at point.
 - ~U~: Upgrade all packages across the active backend.
-- ~s~: ABS install / build from source.
-- ~b~: ABS rebuild existing source clone.
+- ~B~: Install or upgrade the package at point from AUR source via ABS.
+- ~s~ / ~S~: Search packages / search the AUR.
 - ~f~: Filter package list by criteria (upgradeable, AUR, explicit, dependency, orphan).
 - ~F~: Clear active filter.
+- ~v i~ / ~v u~: Show installed / upgradeable packages in the current list.
 - ~w~: Toggle wide view (installed only vs all sync database packages).
 - ~SPC~: Toggle mark on package.
 - ~m~: Mark package and advance line.
@@ -252,7 +253,9 @@ Package sets allow synchronizing installed software configurations across workst
 Manage Emacs Lisp packages through the same keyboard conventions:
 - =M-x arch-elpa-list= displays installed, upgradeable, and available ELPA/MELPA packages.
 - Use ~m~ and ~SPC~ to mark multiple packages, then ~x~ to install or ~D~ to delete in batch.
-- Filter by status with ~f~ (upgradeable, installed, available, built-in).
+- Filter by status with ~f~, or use ~v i~ and ~v u~ for installed and upgradeable packages.
+- The list includes all packages in configured archive metadata; ~w~ toggles
+  installed-only mode and ~C~ refreshes archive metadata.
 - Press ~U~ (=arch-elpa-list-upgrade-all=) to upgrade all outdated ELPA packages in one stroke.
 
 ** Dispatch Transient Menu
@@ -275,7 +278,7 @@ Invoke =M-x arch-dispatch= to view all top-level operations in an ergonomic popu
 |--------------------------------------------------------------------+----------+---------------------------------------------------------------------|
 | [[#arch-dispatch][~arch-dispatch~]]                               | Command  | Central transient entry point for package operations                |
 | [[#arch-list][~arch-list~]]                                       | Command  | Open tabulated package list showing installed and sync packages     |
-| [[#arch-search][~arch-search~]]                                   | Command  | Search registered backends for query with ACR completion           |
+| [[#arch-search][~arch-search~]]                                   | Command  | Search registered backends and display a package list           |
 | [[#arch-search-aur][~arch-search-aur~]]                           | Command  | Search the AUR only via configured AUR backend                     |
 | [[#arch-find-package][~arch-find-package~]]                       | Command  | ACR selection across all sync packages to show info                 |
 | [[#arch-show-info][~arch-show-info~]]                             | Command  | Display detailed metadata, dependencies, and file list for package  |
@@ -319,14 +322,15 @@ Open the tabulated arch package list showing currently installed packages, with 
 :CUSTOM_ID: arch-search
 :END:
 
-Prompt for a search query, query registered backends, and display matching packages grouped by repository using ACR completion.
+Prompt for a query and display matching packages from registered backends in a
+refreshable list.  Press ~i~ to install a result or ~B~ to build from AUR source.
 
 ** arch-search-aur
 :PROPERTIES:
 :CUSTOM_ID: arch-search-aur
 :END:
 
-Query the AUR backend directly for a search string and display results in ACR.
+Query the AUR backend and display results in a refreshable package list.
 
 ** arch-find-package
 :PROPERTIES:

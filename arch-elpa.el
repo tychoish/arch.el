@@ -143,6 +143,8 @@ Union of installed packages and packages available from configured archives."
   "r"     #'arch-elpa-list-remove
   "u"     #'arch-elpa-list-upgrade
   "U"     #'arch-elpa-list-upgrade-all
+  "v i"   #'arch-elpa-list-view-installed
+  "v u"   #'arch-elpa-list-view-upgradeable
   "f"     #'arch-elpa-list-filter
   "F"     #'arch-elpa-list-filter-clear
   "w"     #'arch-elpa-list-toggle-wide
@@ -369,6 +371,16 @@ dependency summary in the echo area (or show info with prefix argument)."
         (seq-filter (lambda (e) (funcall arch-elpa--filter (car e))) arch-elpa--all-entries))
   (tabulated-list-print t)
   (message "arch-elpa: filter: %s" label))
+
+(defun arch-elpa-list-view-installed ()
+  "Show installed packages in the current list."
+  (interactive)
+  (arch-elpa-list-set-filter #'arch-elpa--filter-installed-p "installed"))
+
+(defun arch-elpa-list-view-upgradeable ()
+  "Show upgradeable packages in the current list."
+  (interactive)
+  (arch-elpa-list-set-filter #'arch-elpa--filter-upgradeable-p "upgradeable"))
 
 (defun arch-elpa-list-view-zero-dependencies ()
   "Filter the list to installed packages with zero dependencies."
@@ -821,6 +833,8 @@ If TARGET-PKG is nil, prompt with ACR."
     ("/"   "Find in list"    arch-elpa-list-find)
     ("w"   "Toggle wide"     arch-elpa-list-toggle-wide)
     ("f"   "Filter"          arch-elpa-list-filter)
+    ("vi"  "Installed"       arch-elpa-list-view-installed)
+    ("vu"  "Upgradeable"     arch-elpa-list-view-upgradeable)
     ("0d"  "Zero deps view"  arch-elpa-list-view-zero-dependencies)
     ("0r"  "Zero dependents view" arch-elpa-list-view-zero-dependents)
     ("D"   "Deps of dependents" arch-elpa-search-deps-of-dependents)

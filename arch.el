@@ -747,7 +747,10 @@ and build-percentage output), and auto-scrolling displaying windows."
 Parses `pacman -Qu' output, which has the form \"name old -> new\".
 Lines not matching this format (warnings, blank lines) are skipped."
   (map-into
-   (thread-last (split-string (arch--run-sync (list "pacman" "--query" "--upgrades")) "\n" t)
+   (thread-last (split-string (concat (arch--run-sync (list "pacman" "--query" "--upgrades"))
+                           "\n"
+                           (when (executable-find "yay")
+                             (arch--run-sync (list "yay" "--query" "--upgrades" "--aur") t))) "\n" t)
      (seq-filter (lambda (line) (string-match-p "^[^ ]+ [^ ]+ -> " line)))
      (seq-map (lambda (line) (cons (car (split-string line " " t)) t))))
    '(hash-table :test equal)))
@@ -1063,37 +1066,45 @@ command to reinstall or upgrade an already-installed package."
         (arch--install-dispatch other))
     (arch--install-dispatch name)))
 
+(defun arch--search-packages (query aur-only)
+  "Return packages matching QUERY, searching only AUR when AUR-ONLY."
+  (if aur-only
+      (let* ((backend (arch--aur-backend))
+             (fn (or (arch-backend-aur-search-fn backend)
+                     (user-error "Backend %S does not support AUR-only search"
+                                 (arch-backend-name backend)))))
+        (funcall fn query))
+    (let ((seen (make-hash-table :test #'equal)))
+      (seq-filter
+       (lambda (pkg)
+         (unless (gethash (arch-pkg-name pkg) seen)
+           (puthash (arch-pkg-name pkg) t seen)))
+       (seq-mapcat (lambda (backend)
+                     (when-let* ((fn (arch-backend-search-fn backend)))
+                       (funcall fn query)))
+                   (map-values arch--backends))))))
+
+(defun arch--search-list (query aur-only)
+  "Display results for QUERY in a package list; AUR-ONLY limits the search."
+  (let ((buf (get-buffer-create (if aur-only "*arch-aur-search*" "*arch-search*"))))
+    (with-current-buffer buf
+      (arch-list-mode)
+      (setq arch--list-backend (arch--default-backend)
+            arch--list-search (cons query aur-only))
+      (arch-list-refresh))
+    (pop-to-buffer buf)))
+
 ;;;###autoload
 (defun arch-search (query)
-  "Search all registered backends for QUERY and show info for the selection.
-Results from all backends are merged and grouped by repo in the ACR interface."
+  "Search registered backends for QUERY and display a package list."
   (interactive "sSearch packages: ")
-  (let* ((seen (make-hash-table :test #'equal))
-         (pkgs (or (seq-filter
-                    (lambda (pkg)
-                      (unless (map-elt seen (arch-pkg-name pkg))
-                        (setf (map-elt seen (arch-pkg-name pkg)) t)))
-                    (seq-mapcat
-                     (lambda (backend)
-                       (when-let* ((fn (arch-backend-search-fn backend)))
-                         (funcall fn query)))
-                     (map-values arch--backends)))
-                   (user-error "No packages found for %S" query))))
-    (when-let* ((selected (arch--select-from-pkgs pkgs (format "Search [%s]: " query))))
-      (arch-show-info selected))))
+  (arch--search-list query nil))
 
 ;;;###autoload
 (defun arch-search-aur (query)
-  "Search the AUR only for QUERY and show info for the selection.
-Requires `arch-aur-backend' to support AUR-only search."
+  "Search the AUR for QUERY and display a package list."
   (interactive "sSearch AUR: ")
-  (let* ((backend (arch--aur-backend))
-         (fn (or (arch-backend-aur-search-fn backend)
-                (user-error "Backend %S does not support AUR-only search" (arch-backend-name backend))))
-         (pkgs (or (funcall fn query)
-                  (user-error "No AUR packages found for %S" query))))
-    (when-let* ((selected (arch--select-from-pkgs pkgs (format "AUR search [%s]: " query))))
-      (arch-show-info selected))))
+  (arch--search-list query t))
 
 ;;;###autoload
 (defun arch-find-package ()
@@ -1222,7 +1233,7 @@ lookup used by the package list view."
 (defun arch--info-render (pkg-name plist files)
   "Render PKG-NAME info from PLIST and FILES as YAML into the current buffer."
   (let ((inhibit-read-only t)
-        (aur-p (arch--pkg-aur-source-p pkg-name)))
+        (aur-p arch--info-aur-p))
     (erase-buffer)
     (seq-do
      (lambda (field)
@@ -1267,18 +1278,19 @@ lookup used by the package list view."
 (define-key arch-info-map (kbd "?") #'arch-info-menu)
 
 ;;;###autoload
-(defun arch-show-info (pkg-name)
+(defun arch-show-info (pkg-name &optional fallback)
   "Display detailed info for PKG-NAME in a read-only buffer."
   (interactive "sPackage name: ")
   (let* ((backend (arch--default-backend))
-         (plist (or (arch--cached-info pkg-name)
+         (plist (or (arch--cached-info pkg-name) fallback
                     (user-error "No info found for package %S" pkg-name)))
          (files (funcall (arch-backend-files-fn backend) pkg-name))
          (buf-name (arch--info-buffer-name pkg-name)))
     (with-help-window buf-name
       (with-current-buffer standard-output
         (setq arch--info-package pkg-name)
-        (setq arch--info-aur-p (arch--pkg-aur-source-p pkg-name))
+        (setq arch--info-aur-p (or (equal (plist-get plist 'repository) "aur")
+                                   (arch--pkg-aur-source-p pkg-name)))
         (when-let* ((arch--info-aur-p)
                     (pkg-dir (arch--aur-abs-pkg-dir pkg-name))
                     ((file-directory-p pkg-dir)))
@@ -1353,9 +1365,10 @@ See `arch-kill-progress-buffers' and `arch-kill-info-buffers'."
 If it is already installed, prompts to select a different package instead of
 reinstalling; use `arch-info-upgrade' to upgrade/reinstall it."
   (interactive)
-  (arch--install-with-installed-guard
-   arch--info-package
-   (and (plist-get (arch--cached-info arch--info-package) 'install-date) t)))
+  (let ((installed (plist-get (arch--cached-info arch--info-package) 'install-date)))
+    (if (and arch--info-aur-p (not installed))
+        (arch-abs-install arch--info-package)
+      (arch--install-with-installed-guard arch--info-package installed))))
 
 (defun arch-info-remove ()
   "Remove the package shown in this buffer."
@@ -1484,6 +1497,9 @@ Used to group candidates in `arch-switch-to-buffer'."
 (defvar-local arch--all-entries nil
   "Full unfiltered tabulated-list entries for the current arch-list buffer.")
 
+(defvar-local arch--list-search nil
+  "Search query and AUR-only flag for this list, or nil.")
+
 (defvar-local arch--list-wide nil
   "When non-nil, arch-list shows all sync-DB packages rather than installed only.")
 
@@ -1492,7 +1508,8 @@ Used to group candidates in `arch-switch-to-buffer'."
   (let* ((name (arch-pkg-name pkg))
          (plist (arch--cache-get name))
          (req (when plist (plist-get plist 'required-by))))
-    (setf (arch-pkg-aur-p pkg) (and (map-elt foreign name) t))
+    (setf (arch-pkg-aur-p pkg) (or (equal (arch-pkg-repo pkg) "aur")
+                                   (and (map-elt foreign name) t)))
     (setf (arch-pkg-upgradeable-p pkg) (and (map-elt upgradeable name) t))
     (when plist
       (setf (arch-pkg-explicit-p pkg)
@@ -1561,6 +1578,9 @@ MARKED is a hash table of marked package names."
     map)
   "Keymap for `arch-list-mode'.")
 
+(define-key arch-list-mode-map (kbd "B")   #'arch-list-abs-install)
+(define-key arch-list-mode-map (kbd "v i") #'arch-list-view-installed)
+(define-key arch-list-mode-map (kbd "v u") #'arch-list-view-upgradeable)
 (define-key arch-list-mode-map (kbd "i")   #'arch-list-install)
 (define-key arch-list-mode-map (kbd "I")   #'arch-list-fetch-info)
 (define-key arch-list-mode-map (kbd "a")   #'arch-list-actions)
@@ -1610,7 +1630,8 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
 (defun arch-list-toggle-wide ()
   "Toggle between installed-only and all-packages (sync DB) view."
   (interactive)
-  (setq arch--list-wide (not arch--list-wide))
+  (setq arch--list-search nil
+        arch--list-wide (not arch--list-wide))
   (arch-list-refresh)
   (message "arch: %s" (if arch--list-wide "showing all packages" "showing installed only")))
 
@@ -1627,11 +1648,13 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
                           (funcall fn)
                         (arch--upgradeable-packages)))
          (pkgs (seq-map (lambda (pkg) (arch--enrich-pkg pkg foreign upgradeable))
-                        (if arch--list-wide
+                        (if arch--list-search
+                            (arch--search-packages (car arch--list-search) (cdr arch--list-search))
+                          (if arch--list-wide
                             (if-let* ((fn (arch-backend-list-all-fn backend)))
                                 (funcall fn)
                               (arch--pacman-list-all))
-                          (funcall (arch-backend-list-fn backend))))))
+                          (funcall (arch-backend-list-fn backend)))))))
     (setq arch--all-entries
           (seq-map (lambda (pkg) (arch--build-list-entry pkg arch--marked)) pkgs))
     (setq tabulated-list-entries
@@ -1642,6 +1665,7 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
 
 ;;; Filter predicates
 
+(defun arch--filter-installed-p (pkg) (arch-pkg-installed-p pkg))
 (defun arch--filter-upgradeable-p (pkg)    (arch-pkg-upgradeable-p pkg))
 (defun arch--filter-aur-p (pkg)            (arch-pkg-aur-p pkg))
 (defun arch--filter-explicit-p (pkg)       (arch-pkg-explicit-p pkg))
@@ -1652,7 +1676,8 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
 (defun arch--filter-not-installed-p (pkg)  (not (arch-pkg-installed-p pkg)))
 
 (defconst arch--filter-options
-  '(("upgradeable"    arch--filter-upgradeable-p   "has an available upgrade")
+  '(("installed"      arch--filter-installed-p     "currently installed")
+    ("upgradeable"    arch--filter-upgradeable-p   "has an available upgrade")
     ("aur"            arch--filter-aur-p            "AUR/foreign packages")
     ("explicit"       arch--filter-explicit-p       "explicitly installed")
     ("dep"            arch--filter-dep-p            "installed as a dependency")
@@ -1675,6 +1700,20 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
           (seq-filter (lambda (e) (funcall arch--filter (car e))) arch--all-entries))
     (tabulated-list-print t)
     (message "arch: filter: %s" choice)))
+
+(defun arch-list-view-installed ()
+  "Show installed packages in the current list."
+  (interactive)
+  (setq arch--filter #'arch--filter-installed-p
+        tabulated-list-entries (seq-filter (lambda (e) (arch--filter-installed-p (car e))) arch--all-entries))
+  (tabulated-list-print t))
+
+(defun arch-list-view-upgradeable ()
+  "Show upgradeable packages in the current list."
+  (interactive)
+  (setq arch--filter #'arch--filter-upgradeable-p
+        tabulated-list-entries (seq-filter (lambda (e) (arch--filter-upgradeable-p (car e))) arch--all-entries))
+  (tabulated-list-print t))
 
 (defun arch-list-filter-clear ()
   "Remove the active filter and show all packages."
@@ -1715,7 +1754,7 @@ reach into `arch--info-cache' or `arch-pkg' internals directly."
            (cons "show info"
                  (cons #'arch-list-show-info     "Display package details"))
            (cons "install"
-                 (cons (lambda () (arch--install-with-installed-guard name (arch-pkg-installed-p pkg)))
+                 (cons #'arch-list-install
                        "Install (prompts for a different package if already installed)"))
            (cons "fetch info"
                  (cons #'arch-list-fetch-info
@@ -1859,7 +1898,9 @@ If it is already installed, prompts to select a different package instead of
 reinstalling; use `arch-list-upgrade' to upgrade/reinstall it."
   (interactive)
   (let ((pkg (arch-list--pkg-at-point)))
-    (arch--install-with-installed-guard (arch-pkg-name pkg) (arch-pkg-installed-p pkg))))
+    (if (and (arch-pkg-aur-p pkg) (not (arch-pkg-installed-p pkg)))
+        (arch-abs-install (arch-pkg-name pkg))
+      (arch--install-with-installed-guard (arch-pkg-name pkg) (arch-pkg-installed-p pkg)))))
 
 (defun arch-list-fetch-info ()
   "Fetch and cache full info for the package at point; update its list entry.
@@ -1913,7 +1954,10 @@ Rebuilds without pulling; use `arch-list-abs-install' to update source first."
 (defun arch-list-show-info ()
   "Show package info for the entry at point."
   (interactive)
-  (arch-show-info (arch-pkg-name (arch-list--pkg-at-point))))
+  (let ((pkg (arch-list--pkg-at-point)))
+    (arch-show-info (arch-pkg-name pkg)
+                    (list 'name (arch-pkg-name pkg) 'version (arch-pkg-version pkg)
+                          'repository (arch-pkg-repo pkg) 'description (arch-pkg-description pkg)))))
 
 ;;; Transient menus
 
@@ -1950,6 +1994,8 @@ Rebuilds without pulling; use `arch-list-abs-install' to update source first."
     ("/"   "Find in list"    arch-list-find)
     ("tc"  "Toggle wide"     arch-list-toggle-wide)
     ("fs"  "Filter"          arch-list-filter)
+    ("vi"  "Installed"       arch-list-view-installed)
+    ("vu"  "Upgradeable"     arch-list-view-upgradeable)
     ("fc"  "Clear filter"    arch-list-filter-clear)
     ("ss"  "Search"          arch-search)
     ("sa"  "Search AUR"      arch-search-aur)

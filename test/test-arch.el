@@ -797,3 +797,51 @@ output does."
 
 (provide 'arch-test)
 ;;; arch-test.el ends here
+
+(ert-deftest arch-test-aur-search-list-install-and-refresh ()
+  "AUR search results remain in a refreshable list and install through ABS."
+  (let* ((pkg (arch-pkg--make :name "sample-aur" :repo "aur" :version "1" :description "Sample"))
+         (arch--cache-populated-p t)
+         (calls 0) installed)
+    (cl-letf (((symbol-function 'arch--search-packages)
+               (lambda (query aur) (should (equal query "sample")) (should aur)
+                 (cl-incf calls) (list pkg)))
+              ((symbol-function 'arch--foreign-packages) (lambda () (make-hash-table :test #'equal)))
+              ((symbol-function 'arch--upgradeable-packages) (lambda () (make-hash-table :test #'equal)))
+              ((symbol-function 'arch-abs-install) (lambda (name) (setq installed name)))
+              ((symbol-function 'pop-to-buffer) #'identity))
+      (unwind-protect
+          (progn
+            (arch-search-aur "sample")
+            (with-current-buffer "*arch-aur-search*"
+              (should (derived-mode-p 'arch-list-mode))
+              (should (arch-pkg-aur-p (caar tabulated-list-entries)))
+              (goto-char (point-min))
+              (arch-list-install)
+              (should (equal installed "sample-aur"))
+              (arch-list-refresh)
+              (should (= calls 2))))
+        (when-let* ((buf (get-buffer "*arch-aur-search*"))) (kill-buffer buf))))))
+
+(ert-deftest arch-test-aur-search-info-fallback ()
+  "AUR search metadata provides details and links when pacman has no info."
+  (cl-letf (((symbol-function 'arch--cached-info) #'ignore)
+            ((symbol-function 'arch--pkg-aur-source-p) #'ignore)
+            ((symbol-function 'arch--pacman-files) #'ignore))
+    (unwind-protect
+        (progn
+          (arch-show-info "sample-aur" '(name "sample-aur" repository "aur" version "1" description "Sample"))
+          (with-current-buffer "*arch-info<sample-aur>*"
+            (should arch--info-aur-p)
+            (should (string-match-p "aur.archlinux.org/packages/sample-aur" (buffer-string)))))
+      (when-let* ((buf (get-buffer "*arch-info<sample-aur>*"))) (kill-buffer buf)))))
+
+(ert-deftest arch-test-upgradeable-includes-aur ()
+  "The upgradeable set combines pacman and yay AUR updates."
+  (cl-letf (((symbol-function 'executable-find) (lambda (_) "/usr/bin/yay"))
+            ((symbol-function 'arch--run-sync)
+             (lambda (args &optional _success)
+               (if (equal (car args) "yay") "aur-pkg 1 -> 2\n" "repo-pkg 1 -> 2\n"))))
+    (let ((upgrades (arch--upgradeable-packages)))
+      (should (gethash "aur-pkg" upgrades))
+      (should (gethash "repo-pkg" upgrades)))))
