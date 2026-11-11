@@ -98,6 +98,17 @@ With a prefix argument, always prompt regardless of this setting."
   :type 'boolean
   :group 'arch)
 
+(defcustom arch-list-enable-notifications t
+  "Whether `arch-list-mode' enables notifications while its buffers exist.
+Notifications explicitly enabled outside list mode are preserved."
+  :type 'boolean
+  :group 'arch)
+
+(defcustom arch-list-populate-cache t
+  "Whether entering `arch-list-mode' populates the package cache if needed."
+  :type 'boolean
+  :group 'arch)
+
 (defcustom arch-after-install-hook nil
   "Hook run after a package installation completes successfully.
 Each function is called with one argument, an `arch-pkg' struct instance."
@@ -1621,7 +1632,8 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
          '("Version"     15 t)
          '("Description" 44 nil)))
   (setq tabulated-list-sort-key '("Name" . nil))
-  (tabulated-list-init-header))
+  (tabulated-list-init-header)
+  (arch--list-setup))
 
 (defun arch-list-toggle-wide ()
   "Toggle between installed-only and all-packages (sync DB) view."
@@ -2172,42 +2184,82 @@ individually via `arch-abs-install'."
 
 (declare-function alert "alert")
 
+(defun arch--notify (text)
+  "Display TEXT using alert when available, otherwise a message."
+  (condition-case nil
+      (progn
+        (unless (fboundp 'alert)
+          (require 'alert))
+        (alert text :title "Arch Package Manager"))
+    (error (message "%s" text))))
+
 ;;;###autoload
 (defun arch-alert-after-install (pkg)
   "Display desktop notification via `alert' after PKG install."
-  (when (fboundp 'alert)
-    (alert (format "Installed package %s" (arch-pkg-name pkg))
-           :title "Arch Package Manager")))
+  (arch--notify (format "Installed package %s" (arch-pkg-name pkg))))
 
 ;;;###autoload
 (defun arch-alert-after-upgrade (pkg)
   "Display desktop notification via `alert' after PKG upgrade."
-  (when (fboundp 'alert)
-    (alert (format "Upgraded package %s" (arch-pkg-name pkg))
-           :title "Arch Package Manager")))
+  (arch--notify (format "Upgraded package %s" (arch-pkg-name pkg))))
 
 ;;;###autoload
 (defun arch-alert-after-remove (pkg)
   "Display desktop notification via `alert' after PKG remove."
-  (when (fboundp 'alert)
-    (alert (format "Removed package %s" (arch-pkg-name pkg))
-           :title "Arch Package Manager")))
+  (arch--notify (format "Removed package %s" (arch-pkg-name pkg))))
 
 ;;;###autoload
 (defun arch-alert-after-upgrade-all ()
   "Display desktop notification via `alert' after system upgrade."
-  (when (fboundp 'alert)
-    (alert "System upgrade completed"
-           :title "Arch Package Manager")))
+  (arch--notify "System upgrade completed"))
+
+(defvar arch--list-notification-buffers nil
+  "List buffers currently requesting automatic notifications.")
+
+(defvar arch--list-notification-hooks-added nil
+  "Notification hook entries installed by list mode.")
 
 ;;;###autoload
 (defun arch-enable-desktop-notifications ()
-  "Enable desktop notifications via `alert' for arch package operations."
+  "Enable desktop notifications via `alert' for arch package operations.
+Notifications enabled explicitly remain active after list buffers close."
   (interactive)
+  (setq arch--list-notification-hooks-added nil)
   (add-hook 'arch-after-install-hook #'arch-alert-after-install)
   (add-hook 'arch-after-upgrade-hook #'arch-alert-after-upgrade)
   (add-hook 'arch-after-remove-hook #'arch-alert-after-remove)
   (add-hook 'arch-after-upgrade-all-hook #'arch-alert-after-upgrade-all))
+
+(defun arch--list-notifications-stop ()
+  "Stop this buffer requesting automatic notifications."
+  (setq arch--list-notification-buffers
+        (delq (current-buffer) arch--list-notification-buffers))
+  (remove-hook 'change-major-mode-hook #'arch--list-notifications-stop t)
+  (remove-hook 'kill-buffer-hook #'arch--list-notifications-stop t)
+  (unless arch--list-notification-buffers
+    (seq-do (lambda (entry) (remove-hook (car entry) (cdr entry)))
+            arch--list-notification-hooks-added)
+    (setq arch--list-notification-hooks-added nil)))
+
+(defun arch--list-setup ()
+  "Configure notifications and cache for `arch-list-mode'."
+  (when (and arch-list-populate-cache (not arch--cache-populated-p))
+    (arch--populate-cache))
+  (if arch-list-enable-notifications
+      (progn
+        (unless arch--list-notification-buffers
+          (seq-do (lambda (entry)
+                    (unless (memq (cdr entry) (default-value (car entry)))
+                      (push entry arch--list-notification-hooks-added)
+                      (add-hook (car entry) (cdr entry))))
+                  '((arch-after-install-hook . arch-alert-after-install)
+                    (arch-after-upgrade-hook . arch-alert-after-upgrade)
+                    (arch-after-remove-hook . arch-alert-after-remove)
+                    (arch-after-upgrade-all-hook . arch-alert-after-upgrade-all))))
+        (add-to-list 'arch--list-notification-buffers (current-buffer))
+        (add-hook 'change-major-mode-hook #'arch--list-notifications-stop nil t)
+        (add-hook 'kill-buffer-hook #'arch--list-notifications-stop nil t))
+    (arch--list-notifications-stop)))
 
 (provide 'arch)
 ;;; arch.el ends here

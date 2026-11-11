@@ -10,6 +10,143 @@
                         (file-name-directory (or load-file-name buffer-file-name))))
 (require 'arch)
 
+(ert-deftest arch-test-list-mode-setup-options ()
+  "List setup applies its options and does not repopulate a warm cache."
+  (let ((arch-after-install-hook nil)
+        (arch-after-upgrade-hook nil)
+        (arch-after-remove-hook nil)
+        (arch-after-upgrade-all-hook nil)
+        (arch--cache-populated-p nil)
+        (arch-list-populate-cache t)
+        (arch-list-enable-notifications t)
+        (arch--list-notification-buffers nil)
+        (arch--list-notification-hooks-added nil)
+        (calls 0)
+        (original (symbol-function 'arch--populate-cache)))
+    (unwind-protect
+        (progn
+          (fset 'arch--populate-cache
+                (lambda () (setq calls (1+ calls) arch--cache-populated-p t)))
+          (with-temp-buffer
+            (arch-list-mode)
+            (should (memq #'arch-alert-after-install arch-after-install-hook))
+            (fundamental-mode))
+          (with-temp-buffer (arch-list-mode) (fundamental-mode))
+          (should (= calls 1))
+          (should-not (memq #'arch-alert-after-install arch-after-install-hook))
+          (setq arch-list-enable-notifications nil
+                arch-list-populate-cache nil
+                arch--cache-populated-p nil)
+          (setq arch-after-install-hook nil)
+          (with-temp-buffer (arch-list-mode))
+          (should (= calls 1))
+          (should-not (memq #'arch-alert-after-install arch-after-install-hook)))
+      (fset 'arch--populate-cache original))))
+
+(ert-deftest arch-test-list-notifications-follow-buffer-lifecycle ()
+  "Keep automatic hooks until the last list buffer leaves or is killed."
+  (let ((arch-after-install-hook '(arch-alert-after-install))
+        (arch-after-upgrade-hook nil)
+        (arch-after-remove-hook nil)
+        (arch-after-upgrade-all-hook nil)
+        (arch-list-populate-cache nil)
+        (arch-list-enable-notifications t)
+        (arch--list-notification-buffers nil)
+        (arch--list-notification-hooks-added nil)
+        (first (generate-new-buffer " *arch-test-list-1*"))
+        (second (generate-new-buffer " *arch-test-list-2*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer first (arch-list-mode))
+          (with-current-buffer second (arch-list-mode))
+          (should (memq #'arch-alert-after-upgrade arch-after-upgrade-hook))
+          (with-current-buffer first (fundamental-mode))
+          (should (memq #'arch-alert-after-upgrade arch-after-upgrade-hook))
+          (kill-buffer second)
+          (should-not (memq #'arch-alert-after-upgrade arch-after-upgrade-hook))
+          (should (memq #'arch-alert-after-install arch-after-install-hook))
+          (should-not arch--list-notification-buffers))
+      (when (buffer-live-p first) (kill-buffer first))
+      (when (buffer-live-p second) (kill-buffer second)))))
+
+(ert-deftest arch-test-list-setup-disables-current-buffer-notifications ()
+  "Reapplying list setup with notifications disabled releases its hooks."
+  (let ((arch-after-install-hook nil)
+        (arch-after-upgrade-hook nil)
+        (arch-after-remove-hook nil)
+        (arch-after-upgrade-all-hook nil)
+        (arch-list-populate-cache nil)
+        (arch-list-enable-notifications t)
+        (arch--list-notification-buffers nil)
+        (arch--list-notification-hooks-added nil))
+    (with-temp-buffer
+      (arch-list-mode)
+      (should (memq #'arch-alert-after-install arch-after-install-hook))
+      (setq arch-list-enable-notifications nil)
+      (arch--list-setup)
+      (should-not (memq #'arch-alert-after-install arch-after-install-hook))
+      (should-not arch--list-notification-buffers))))
+
+(ert-deftest arch-test-manual-notifications-survive-list-mode ()
+  "Explicitly enabled notifications remain after the list buffer exits."
+  (let ((arch-after-install-hook nil)
+        (arch-after-upgrade-hook nil)
+        (arch-after-remove-hook nil)
+        (arch-after-upgrade-all-hook nil)
+        (arch-list-populate-cache nil)
+        (arch-list-enable-notifications t)
+        (arch--list-notification-buffers nil)
+        (arch--list-notification-hooks-added nil))
+    (with-temp-buffer
+      (arch-list-mode)
+      (arch-enable-desktop-notifications)
+      (fundamental-mode))
+    (should (memq #'arch-alert-after-install arch-after-install-hook))
+    (should (memq #'arch-alert-after-upgrade-all arch-after-upgrade-all-hook))))
+
+(ert-deftest arch-test-notify-alert-and-fallback ()
+  "Notifications use alert when possible and fall back when it fails."
+  (let ((original-alert (and (fboundp 'alert) (symbol-function 'alert)))
+        (original-message (symbol-function 'message))
+        seen)
+    (unwind-protect
+        (progn
+          (fset 'alert (lambda (text &rest _) (setq seen (list 'alert text))))
+          (fset 'message (lambda (_format &rest args) (setq seen (cons 'message args))))
+          (arch-alert-after-install (arch-pkg--make :name "example"))
+          (should (equal seen '(alert "Installed package example")))
+          (fset 'alert (lambda (&rest _) (error "unavailable")))
+          (arch-alert-after-upgrade-all)
+          (should (equal seen '(message "System upgrade completed"))))
+      (if original-alert
+          (fset 'alert original-alert)
+        (fmakunbound 'alert))
+      (fset 'message original-message))))
+
+(ert-deftest arch-test-notify-loads-alert-lazily ()
+  "Load alert on demand and fall back if it cannot be loaded."
+  (let ((original-alert (and (fboundp 'alert) (symbol-function 'alert)))
+        (original-require (symbol-function 'require))
+        (original-message (symbol-function 'message))
+        seen)
+    (unwind-protect
+        (progn
+          (fmakunbound 'alert)
+          (fset 'message (lambda (_format &rest args) (setq seen (cons 'message args))))
+          (fset 'require (lambda (&rest _) (error "missing alert")))
+          (arch--notify "missing")
+          (should (equal seen '(message "missing")))
+          (fset 'require
+                (lambda (&rest _)
+                  (fset 'alert (lambda (text &rest _) (setq seen (list 'alert text))))))
+          (arch--notify "loaded")
+          (should (equal seen '(alert "loaded"))))
+      (if original-alert
+          (fset 'alert original-alert)
+        (fmakunbound 'alert))
+      (fset 'require original-require)
+      (fset 'message original-message))))
+
 ;;; Backend registry
 
 (ert-deftest arch-test-register-and-lookup-backend ()
