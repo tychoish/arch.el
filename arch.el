@@ -105,7 +105,8 @@ Notifications explicitly enabled outside list mode are preserved."
   :group 'arch)
 
 (defcustom arch-list-populate-cache t
-  "Whether entering `arch-list-mode' populates the package cache if needed."
+  "Whether entering `arch-list-mode' refreshes the package cache.
+Refresh immediately when it contains entries, or on an idle timer when empty."
   :type 'boolean
   :group 'arch)
 
@@ -232,6 +233,9 @@ A single package looked up via `arch--cached-info' adds one entry to
 the difference between \"cache has one stray entry\" and \"cache is
 actually populated\".")
 
+(defvar arch--list-cache-timer nil
+  "Pending timer for populating the cache for Arch list buffers.")
+
 (defun arch--cache-get (pkg-name)
   "Return cached info plist for PKG-NAME, or nil."
   (map-elt arch--info-cache pkg-name))
@@ -244,6 +248,9 @@ actually populated\".")
 (defun arch-cache-drop ()
   "Clear all cached package info and dependency graphs."
   (interactive)
+  (when arch--list-cache-timer
+    (cancel-timer arch--list-cache-timer)
+    (setq arch--list-cache-timer nil))
   (clrhash arch--info-cache)
   (arch-depgraph-clear)
   (setq arch--cache-populated-p nil)
@@ -418,6 +425,9 @@ When FORCE is non-nil, rebuild the graph from `arch--info-cache'."
 
 (defun arch--populate-cache ()
   "Populate the package info cache via the current backend's populate-cache-fn."
+  (when arch--list-cache-timer
+    (cancel-timer arch--list-cache-timer)
+    (setq arch--list-cache-timer nil))
   (if-let* ((fn (arch-backend-populate-cache-fn (arch--default-backend))))
       (funcall fn)
     (arch--pacman-populate-cache))
@@ -1646,7 +1656,7 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
 (defun arch-list-refresh ()
   "Refresh the arch package list buffer."
   (interactive)
-  (unless arch--cache-populated-p
+  (unless (or arch--cache-populated-p arch--list-cache-timer)
     (arch--populate-cache))
   (let* ((backend (or arch--list-backend (arch--default-backend)))
          (foreign (if-let* ((fn (arch-backend-foreign-fn backend)))
@@ -2241,10 +2251,24 @@ Notifications enabled explicitly remain active after list buffers close."
             arch--list-notification-hooks-added)
     (setq arch--list-notification-hooks-added nil)))
 
+(defun arch--list-populate-cache ()
+  "Populate the cache and refresh open Arch list buffers."
+  (setq arch--list-cache-timer nil)
+  (arch--populate-cache)
+  (seq-do (lambda (buffer)
+            (with-current-buffer buffer
+              (when (derived-mode-p 'arch-list-mode)
+                (arch-list-refresh))))
+          (buffer-list)))
+
 (defun arch--list-setup ()
   "Configure notifications and cache for `arch-list-mode'."
-  (when (and arch-list-populate-cache (not arch--cache-populated-p))
-    (arch--populate-cache))
+  (when arch-list-populate-cache
+    (if (> (hash-table-count arch--info-cache) 0)
+        (arch--populate-cache)
+      (unless arch--list-cache-timer
+        (setq arch--list-cache-timer
+              (run-with-idle-timer 2 nil #'arch--list-populate-cache)))))
   (if arch-list-enable-notifications
       (progn
         (unless arch--list-notification-buffers

@@ -11,12 +11,14 @@
 (require 'arch)
 
 (ert-deftest arch-test-list-mode-setup-options ()
-  "List setup applies its options and does not repopulate a warm cache."
+  "List setup applies its options and refreshes a warm cache immediately."
   (let ((arch-after-install-hook nil)
         (arch-after-upgrade-hook nil)
         (arch-after-remove-hook nil)
         (arch-after-upgrade-all-hook nil)
         (arch--cache-populated-p nil)
+        (arch--info-cache (make-hash-table :test #'equal))
+        (arch--list-cache-timer nil)
         (arch-list-populate-cache t)
         (arch-list-enable-notifications t)
         (arch--list-notification-buffers nil)
@@ -25,6 +27,7 @@
         (original (symbol-function 'arch--populate-cache)))
     (unwind-protect
         (progn
+          (setf (map-elt arch--info-cache "cached") '(name "cached"))
           (fset 'arch--populate-cache
                 (lambda () (setq calls (1+ calls) arch--cache-populated-p t)))
           (with-temp-buffer
@@ -32,16 +35,89 @@
             (should (memq #'arch-alert-after-install arch-after-install-hook))
             (fundamental-mode))
           (with-temp-buffer (arch-list-mode) (fundamental-mode))
-          (should (= calls 1))
+          (should (= calls 2))
           (should-not (memq #'arch-alert-after-install arch-after-install-hook))
           (setq arch-list-enable-notifications nil
                 arch-list-populate-cache nil
                 arch--cache-populated-p nil)
           (setq arch-after-install-hook nil)
           (with-temp-buffer (arch-list-mode))
-          (should (= calls 1))
+          (should (= calls 2))
           (should-not (memq #'arch-alert-after-install arch-after-install-hook)))
       (fset 'arch--populate-cache original))))
+
+(ert-deftest arch-test-cold-list-cache-populates-once-on-timer ()
+  "Cold list refreshes defer cache population and redraw after the timer."
+  (let ((arch--info-cache (make-hash-table :test #'equal))
+        (arch--cache-populated-p nil)
+        (arch--list-cache-timer nil)
+        (arch-list-populate-cache t)
+        (arch-list-enable-notifications nil)
+        (arch--list-notification-buffers nil)
+        (arch--list-notification-hooks-added nil)
+        (scheduled 0)
+        (populated 0)
+        (listed 0)
+        (original-timer (symbol-function 'run-with-idle-timer))
+        (original-populate (symbol-function 'arch--populate-cache)))
+    (unwind-protect
+        (progn
+          (fset 'run-with-idle-timer
+                (lambda (&rest _) (setq scheduled (1+ scheduled)) 'scheduled))
+          (fset 'arch--populate-cache
+                (lambda () (setq populated (1+ populated) arch--cache-populated-p t)))
+          (with-temp-buffer
+            (arch-list-mode)
+            (setq arch--list-backend
+                  (arch-backend--make
+                   :foreign-fn (lambda () (make-hash-table :test #'equal))
+                   :upgradeable-fn (lambda () (make-hash-table :test #'equal))
+                   :list-fn (lambda () (setq listed (1+ listed)) nil)))
+            (arch--list-setup)
+            (arch-list-refresh)
+            (should (= scheduled 1))
+            (should (= populated 0))
+            (arch--list-populate-cache)
+            (should (= populated 1))
+            (should (= listed 2))
+            (should-not arch--list-cache-timer)))
+      (fset 'run-with-idle-timer original-timer)
+      (fset 'arch--populate-cache original-populate))))
+
+(ert-deftest arch-test-cache-drop-cancels-pending-population ()
+  "Dropping the cache cancels the pending automatic population."
+  (let ((arch--info-cache (make-hash-table :test #'equal))
+        (arch--list-cache-timer 'scheduled)
+        (arch-depgraph--cache (make-hash-table :test #'equal))
+        (original (symbol-function 'cancel-timer))
+        cancelled)
+    (unwind-protect
+        (progn
+          (fset 'cancel-timer (lambda (timer) (setq cancelled timer)))
+          (arch-cache-drop)
+          (should (eq cancelled 'scheduled))
+          (should-not arch--list-cache-timer))
+      (fset 'cancel-timer original))))
+
+(ert-deftest arch-test-cache-population-cancels-pending-timer ()
+  "An explicit cache population prevents a redundant timer run."
+  (let ((arch--backends (make-hash-table :test #'equal))
+        (arch-default-backend "test")
+        (arch--cache-populated-p nil)
+        (arch--list-cache-timer 'scheduled)
+        (original (symbol-function 'cancel-timer))
+        cancelled populated)
+    (arch-register-backend
+     (arch-backend--make :name "test" :populate-cache-fn (lambda () (setq populated t))))
+    (unwind-protect
+        (progn
+          (fset 'cancel-timer (lambda (timer) (setq cancelled timer)))
+          (arch--populate-cache)
+          (should (eq cancelled 'scheduled))
+          (should populated)
+          (should arch--cache-populated-p)
+          (should-not arch--list-cache-timer))
+      (fset 'cancel-timer original))))
 
 (ert-deftest arch-test-list-notifications-follow-buffer-lifecycle ()
   "Keep automatic hooks until the last list buffer leaves or is killed."
