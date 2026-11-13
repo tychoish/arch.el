@@ -533,10 +533,11 @@ commands accumulate output in the buffer."
   "Return the dedicated operation buffer for PKG-NAME, creating it if needed."
   (get-buffer-create (format "*arch:%s*" pkg-name)))
 
-(defun arch--pkg-run (pkg-name args &optional op pkg)
+(defun arch--pkg-run (pkg-name args &optional op pkg directory)
   "Run ARGS in PKG-NAME's dedicated buffer, appending to existing content.
 OP is operation type symbol (\='install, \='upgrade, \='remove, \='upgrade-all).
-PKG is an optional `arch-pkg' struct or package name."
+PKG is an optional `arch-pkg' struct or package name.
+DIRECTORY is the intended buffer directory, including for a future clone."
   (let ((buf (arch--pkg-buffer pkg-name)))
     (arch--init-install-buffer buf)
     (with-current-buffer buf
@@ -549,12 +550,20 @@ PKG is an optional `arch-pkg' struct or package name."
                             'face 'bold))
         (dolist (win (get-buffer-window-list buf nil t))
           (set-window-point win (point-max)))))
-    (let ((proc (make-process
+    (let* ((default-directory (if directory
+                                  (if (file-directory-p directory)
+                                      (file-name-as-directory directory)
+                                    (file-name-directory (directory-file-name directory)))
+                                default-directory))
+           (proc (make-process
                  :name (format "arch-%s" pkg-name)
                  :buffer buf
                  :command args
                  :filter #'arch--pkg-filter
                  :sentinel #'arch--pkg-sentinel)))
+      (when directory
+        (with-current-buffer buf
+          (setq default-directory (file-name-as-directory directory))))
       (set-process-query-on-exit-flag proc nil)
       (when op
         (process-put proc 'arch-op op)
@@ -962,7 +971,8 @@ Registered as AUR backend's `abs-install-fn'; called via `arch-abs-install'."
                                  fetch-cmd
                                  (shell-quote-argument pkg-dir)))
                    'install
-                   (or pkg pkg-name))))
+                   (or pkg pkg-name)
+                   pkg-dir)))
 
 (defun arch--aur-abs-rebuild (pkg-name &optional pkg)
   "Rebuild PKG-NAME in its existing abs directory without pulling.
@@ -975,7 +985,8 @@ Registered as AUR backend's `abs-rebuild-fn'; called via `arch-abs-rebuild'."
                          (format "cd %s && makepkg --syncdeps --force --install --noconfirm --noprogressbar"
                                  (shell-quote-argument pkg-dir)))
                    'upgrade
-                   (or pkg pkg-name))))
+                   (or pkg pkg-name)
+                   pkg-dir)))
 
 ;;;###autoload
 (defun arch-abs-install (pkg-name)

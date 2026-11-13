@@ -864,6 +864,36 @@ over a window showing a progress buffer, even though both are eligible."
                       #'arch-install-recompile-disabled)))
       (kill-buffer buf))))
 
+(ert-deftest arch-test-abs-install-buffer-directory ()
+  "ABS output points at the clone, even when it does not exist yet."
+  (let* ((arch-abs-directory (make-temp-file "arch-abs-test" t))
+         (pkg-dir (expand-file-name "test-pkg" arch-abs-directory))
+         (arch-bury-progress-buffers t)
+         (buf (get-buffer-create "*arch:test-abs-directory*")))
+    (unwind-protect
+        (let ((proc (arch--pkg-run "test-abs-directory" '("true") nil nil pkg-dir)))
+          (while (process-live-p proc) (accept-process-output proc 0.1))
+          (should (equal (buffer-local-value 'default-directory buf)
+                         (file-name-as-directory pkg-dir))))
+      (kill-buffer buf)
+      (delete-directory arch-abs-directory t))))
+
+(ert-deftest arch-test-abs-install-passes-build-directory ()
+  "ABS install and rebuild pass the package directory to the runner."
+  (let* ((arch-abs-directory (make-temp-file "arch-abs-test" t))
+         (pkg-dir (expand-file-name "test-pkg" arch-abs-directory))
+         captured)
+    (unwind-protect
+        (cl-letf (((symbol-function 'arch--pkg-run)
+                   (lambda (_name _args &optional _op _pkg directory)
+                     (setq captured directory))))
+          (arch--aur-abs-install "test-pkg")
+          (should (equal captured pkg-dir))
+          (make-directory pkg-dir)
+          (arch--aur-abs-rebuild "test-pkg")
+          (should (equal captured pkg-dir)))
+      (delete-directory arch-abs-directory t))))
+
 (ert-deftest arch-test-pkg-run-initializes-arch-install-mode ()
   "arch--pkg-run initializes buffer in arch-install-mode and appends command banner."
   (let ((buf (get-buffer-create "*arch:test-init*")))
