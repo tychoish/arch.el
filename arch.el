@@ -1709,8 +1709,27 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
     ("not-installed"  arch--filter-not-installed-p  "available but not installed (wide mode)"))
   "Alist of (label predicate-symbol description) for arch-list filters.")
 
+(defun arch--list-filter-view (predicate label)
+  "Open a filtered view of this list using PREDICATE and LABEL."
+  (let ((source (current-buffer))
+        (buf (generate-new-buffer (format "*arch-list: %s*" label))))
+    (with-current-buffer buf
+      (arch-list-mode)
+      (setq arch--list-backend (buffer-local-value 'arch--list-backend source))
+      (setq arch--list-search (buffer-local-value 'arch--list-search source))
+      (setq arch--list-wide (buffer-local-value 'arch--list-wide source))
+      (setq arch--marked (copy-hash-table (buffer-local-value 'arch--marked source)))
+      (setq arch--all-entries
+            (seq-map (lambda (entry) (arch--build-list-entry (car entry) arch--marked))
+                     (buffer-local-value 'arch--all-entries source)))
+      (setq arch--filter predicate)
+      (setq tabulated-list-entries
+            (seq-filter (lambda (entry) (funcall predicate (car entry))) arch--all-entries))
+      (tabulated-list-print t))
+    (pop-to-buffer buf)))
+
 (defun arch-list-filter ()
-  "Set a filter on the arch package list via ACR."
+  "Open a filtered package list via ACR."
   (interactive)
   (let* ((choice (annotated-completing-read
                   (seq-map (lambda (opt) (cons (car opt) (caddr opt)))
@@ -1718,25 +1737,17 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
                   :prompt "Filter packages: "
                   :require-match t
                   :category 'arch-filter)))
-    (setq arch--filter (symbol-function (cadr (assoc choice arch--filter-options))))
-    (setq tabulated-list-entries
-          (seq-filter (lambda (e) (funcall arch--filter (car e))) arch--all-entries))
-    (tabulated-list-print t)
-    (message "arch: filter: %s" choice)))
+    (arch--list-filter-view (cadr (assoc choice arch--filter-options)) choice)))
 
 (defun arch-list-view-installed ()
-  "Show installed packages in the current list."
+  "Open a view of installed packages in the current list."
   (interactive)
-  (setq arch--filter #'arch--filter-installed-p
-        tabulated-list-entries (seq-filter (lambda (e) (arch--filter-installed-p (car e))) arch--all-entries))
-  (tabulated-list-print t))
+  (arch--list-filter-view #'arch--filter-installed-p "installed"))
 
 (defun arch-list-view-upgradeable ()
-  "Show upgradeable packages in the current list."
+  "Open a view of upgradeable packages in the current list."
   (interactive)
-  (setq arch--filter #'arch--filter-upgradeable-p
-        tabulated-list-entries (seq-filter (lambda (e) (arch--filter-upgradeable-p (car e))) arch--all-entries))
-  (tabulated-list-print t))
+  (arch--list-filter-view #'arch--filter-upgradeable-p "upgradeable"))
 
 (defun arch-list-filter-clear ()
   "Remove the active filter and show all packages."
@@ -1821,6 +1832,14 @@ reach into `arch--info-cache' or `arch-pkg' internals directly."
   "Return non-nil if there is a package at point."
   (tabulated-list-get-id))
 
+(defun arch--list-update-mark (name)
+  "Update stored and displayed mark for package NAME."
+  (let ((text (arch--list-name-string name (map-elt arch--marked name))))
+    (when-let* ((entry (seq-find (lambda (e) (equal name (arch-pkg-name (car e))))
+                                 arch--all-entries)))
+      (aset (cadr entry) 0 text))
+    (tabulated-list-set-col 0 text t)))
+
 (defun arch-list-toggle-mark ()
   "Toggle mark on the package at point without moving point."
   (interactive)
@@ -1829,14 +1848,14 @@ reach into `arch--info-cache' or `arch-pkg' internals directly."
     (if (map-elt arch--marked name)
         (map-delete arch--marked name)
       (setf (map-elt arch--marked name) t))
-    (tabulated-list-set-col 0 (arch--list-name-string name (map-elt arch--marked name)) t)))
+    (arch--list-update-mark name)))
 
 (defun arch-list-mark ()
   "Mark the package at point and advance to the next line."
   (interactive)
   (when-let* ((pkg (tabulated-list-get-id)))
     (setf (map-elt arch--marked (arch-pkg-name pkg)) t)
-    (tabulated-list-set-col 0 (arch--list-name-string (arch-pkg-name pkg) t) t)
+    (arch--list-update-mark (arch-pkg-name pkg))
     (forward-line 1)))
 
 (defun arch-list-unmark ()
@@ -1844,13 +1863,16 @@ reach into `arch--info-cache' or `arch-pkg' internals directly."
   (interactive)
   (when-let* ((pkg (tabulated-list-get-id)))
     (map-delete arch--marked (arch-pkg-name pkg))
-    (tabulated-list-set-col 0 (arch--list-name-string (arch-pkg-name pkg) nil) t)
+    (arch--list-update-mark (arch-pkg-name pkg))
     (forward-line -1)))
 
 (defun arch-list-unmark-all ()
   "Unmark all packages in the list."
   (interactive)
   (clrhash arch--marked)
+  (seq-do (lambda (entry)
+            (aset (cadr entry) 0 (arch--list-name-string (arch-pkg-name (car entry)) nil)))
+          arch--all-entries)
   (tabulated-list-print t))
 
 (defun arch--list-marked-names ()

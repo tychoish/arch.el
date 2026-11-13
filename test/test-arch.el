@@ -456,6 +456,39 @@
 
 ;;; Filter predicates
 
+(ert-deftest arch-test-filter-opens-independent-view ()
+  "Filtering creates a separate view with independent marks."
+  (let ((arch-list-populate-cache nil)
+        (arch-list-enable-notifications nil)
+        (source (generate-new-buffer " *arch-source*"))
+        view)
+    (unwind-protect
+        (progn
+          (with-current-buffer source
+            (arch-list-mode)
+            (setq arch--marked (make-hash-table :test #'equal))
+            (setq arch--all-entries
+                  (list (arch--build-list-entry (arch-pkg--make :name "one" :repo "core" :version "1" :description "" :installed-p t)
+                                                arch--marked)
+                        (arch--build-list-entry (arch-pkg--make :name "two" :repo "core" :version "1" :description "") arch--marked)))
+            (setf (map-elt arch--marked "one") t)
+            (save-window-excursion
+              (arch-list-view-installed)
+              (setq view (current-buffer))))
+          (with-current-buffer view
+            (should (= 1 (length tabulated-list-entries)))
+            (should (eq (get-text-property 0 'face (aref (cadar tabulated-list-entries) 0))
+                        'arch-face-pkg-link-marked))
+            (goto-char (point-min))
+            (arch-list-toggle-mark)
+            (tabulated-list-print t)
+            (should (eq (get-text-property 0 'face (aref (cadar tabulated-list-entries) 0))
+                        'arch-face-pkg-link)))
+          (should (map-elt (buffer-local-value 'arch--marked source) "one"))
+          (should-not (buffer-local-value 'arch--filter source)))
+      (when (buffer-live-p view) (kill-buffer view))
+      (kill-buffer source))))
+
 (ert-deftest arch-test-filter-marked ()
   "The marked filter uses the current list's marked names."
   (with-temp-buffer
