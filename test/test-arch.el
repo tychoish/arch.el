@@ -1161,3 +1161,40 @@ output does."
           (with-current-buffer buf (should (string-match-p "after-error" (buffer-string)))))
       (when-let* ((proc (get-buffer-process buf))) (delete-process proc))
       (kill-buffer buf))))
+
+(ert-deftest arch-test-aur-run-backend-protocol ()
+  "AUR dispatch uses registered ABS or helper functions."
+  (let* (calls
+        (backend (arch-backend--make
+                  :name "custom"
+                  :abs-install-fn (lambda (name) (push (list 'abs name) calls))
+                  :aur-batch-fn (lambda (names op) (push (list 'helper names op) calls)))))
+    (cl-letf (((symbol-function 'arch--aur-backend) (lambda () backend)))
+      (let ((arch-aur-install-method 'abs))
+        (arch--aur-run '("a" "b") 'upgrade)
+        (should (equal calls '((abs "b") (abs "a")))))
+      (let ((arch-aur-install-method 'helper))
+        (arch--aur-run '("a" "b") 'upgrade)
+        (should (equal (car calls) '(helper ("a" "b") upgrade)))))))
+
+(ert-deftest arch-test-aur-entry-points-dispatch ()
+  "AUR install and upgrade entry points honor the configured method."
+  (let ((pkg (arch-pkg--make :name "aur-pkg" :aur-p t)) calls)
+    (cl-letf (((symbol-function 'arch--package-aur-p) (lambda (_) t))
+              ((symbol-function 'arch-list--pkg-at-point) (lambda () pkg))
+              ((symbol-function 'arch--aur-run) (lambda (names op) (push (list names op) calls))))
+      (arch-install "aur-pkg")
+      (arch-list-upgrade)
+      (should (equal calls '((("aur-pkg") upgrade) (("aur-pkg") install)))))))
+
+(ert-deftest arch-test-aur-marked-dispatch ()
+  "Marked AUR installs and upgrades pass through the configured dispatcher."
+  (let ((arch--marked (make-hash-table :test #'equal))
+        (arch--all-entries (list (list (arch-pkg--make :name "foreign" :aur-p t))))
+        calls)
+    (setf (map-elt arch--marked "foreign") t)
+    (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t))
+              ((symbol-function 'arch--aur-run) (lambda (names op) (push (list names op) calls))))
+      (arch-list-install-marked)
+      (arch-list-upgrade-marked)
+      (should (equal calls '((("foreign") upgrade) (("foreign") install)))))))

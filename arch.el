@@ -52,6 +52,7 @@
   remove-fn       ; (fn pkg-name)
   upgrade-fn      ; (fn pkg-name) — nil means unsupported
   upgrade-all-fn  ; (fn) — nil means unsupported
+  aur-batch-fn    ; (fn pkg-names op) — helper installs/upgrades; nil = unsupported
   abs-install-fn  ; (fn pkg-name) — install/upgrade from source (clone/pull + build); nil = unsupported
   abs-rebuild-fn  ; (fn pkg-name) — rebuild from existing source clone; nil = unsupported
   depgraph-fn)    ; (fn) → arch-depgraph; nil = unsupported
@@ -81,6 +82,13 @@ Change this to use an alternative AUR helper such as \"paru\"."
   "Return the AUR backend or signal a user error."
   (or (map-elt arch--backends arch-aur-backend)
       (user-error "AUR backend %S not registered" arch-aur-backend)))
+
+(defcustom arch-aur-install-method 'abs
+  "Method for AUR package installs and upgrades.
+`abs' builds each package from source; `helper' invokes `arch-aur-backend'."
+  :type '(choice (const :tag "Build from ABS" abs)
+                 (const :tag "AUR helper" helper))
+  :group 'arch)
 
 (defcustom arch-default-install-method nil
   "Default install method: `direct', `abs', or `rebuild'.
@@ -834,6 +842,10 @@ list display once info is fetched and cached via `arch-list-fetch-info'."
                  'install
                  (or pkg pkg-name)))
 
+(defun arch--yay-aur-batch (names op)
+  "Install or upgrade AUR NAMES with yay, recording OP."
+  (arch--worker-run (append '("yay" "--sync" "--noconfirm") names) op names))
+
 (defun arch--pacman-install-batch (pkg-names)
   "Install PKG-NAMES via one pacman --sync invocation into the worker buffer."
   (arch--worker-run (append (list "sudo" "pacman" "--noconfirm" "--noprogressbar" "--sync") pkg-names)
@@ -921,7 +933,10 @@ versions, so upgrading those requires rebuilding individually via
 (defalias 'arch--abs-clone-url #'arch--aur-abs-clone-url)
 (defalias 'arch--abs-pkg-dir #'arch--aur-abs-pkg-dir)
 
-(defun arch--aur-abs-install (pkg-name &optional pkg)
+(defvar arch--aur-operation nil
+  "Operation to record for ABS installs dispatched as upgrades.")
+
+(defun arch--aur-abs-install (pkg-name &optional pkg op)
   "Install PKG-NAME from AUR: clone to abs dir, then run makepkg -sfi.
 Registered as AUR backend's `abs-install-fn'; called via `arch-abs-install'."
   (make-directory arch-abs-directory t)
@@ -936,7 +951,7 @@ Registered as AUR backend's `abs-install-fn'; called via `arch-abs-install'."
                          (format "%s && cd %s && makepkg --syncdeps --force --install --noconfirm --noprogressbar"
                                  fetch-cmd
                                  (shell-quote-argument pkg-dir)))
-                   'install
+                   (or op arch--aur-operation 'install)
                    (or pkg pkg-name)
                    pkg-dir)))
 
@@ -971,6 +986,28 @@ Registered as AUR backend's `abs-rebuild-fn'; called via `arch-abs-rebuild'."
               (user-error "Backend %S does not support AUR source rebuilds"
                           (arch-backend-name (arch--aur-backend))))
           pkg-name))
+
+(defun arch--aur-run (names op)
+  "Install or upgrade AUR NAMES with configured method, recording OP."
+  (pcase arch-aur-install-method
+    ('abs (let ((arch--aur-operation op))
+            (seq-do #'arch-abs-install names)))
+    ('helper
+     (let* ((backend (arch--aur-backend))
+            (fn (or (arch-backend-aur-batch-fn backend)
+                    (user-error "Backend %s has no AUR helper batch operation"
+                                (arch-backend-name backend)))))
+       (funcall fn names op)))
+    (_ (user-error "Invalid AUR install method: %s" arch-aur-install-method))))
+
+(defun arch--package-aur-p (name)
+  "Return non-nil when NAME is a known AUR package."
+  (or (equal (plist-get (arch--cache-get name) 'repository) "aur")
+      (arch--pkg-aur-source-p name)
+      (when-let* ((fn (arch-backend-list-all-fn (arch--default-backend)))
+                  (pkg (seq-find (lambda (p) (equal (arch-pkg-name p) name))
+                                 (funcall fn))))
+        (or (arch-pkg-aur-p pkg) (equal (arch-pkg-repo pkg) "aur")))))
 
 ;;; ACR search/select
 
@@ -1361,7 +1398,7 @@ reinstalling; use `arch-info-upgrade' to upgrade/reinstall it."
   (interactive)
   (let ((installed (plist-get (arch--cached-info arch--info-package) 'install-date)))
     (if (and arch--info-aur-p (not installed))
-        (arch-abs-install arch--info-package)
+        (arch--aur-run (list arch--info-package) 'install)
       (arch--install-with-installed-guard arch--info-package installed))))
 
 (defun arch-info-remove ()
@@ -1373,8 +1410,10 @@ reinstalling; use `arch-info-upgrade' to upgrade/reinstall it."
 (defun arch-info-upgrade ()
   "Upgrade the package shown in this buffer."
   (interactive)
-  (when-let* ((fn (arch-backend-upgrade-fn (arch--default-backend))))
-    (funcall fn arch--info-package)))
+  (if arch--info-aur-p
+      (arch--aur-run (list arch--info-package) 'upgrade)
+    (when-let* ((fn (arch-backend-upgrade-fn (arch--default-backend))))
+      (funcall fn arch--info-package))))
 
 (defun arch-info-abs-install ()
   "Install or upgrade the package shown in this buffer from AUR source.
@@ -1583,6 +1622,7 @@ MARKED is a hash table of marked package names."
 (define-key arch-list-mode-map (kbd "F")   #'arch-list-filter-clear)
 (define-key arch-list-mode-map (kbd "u")   #'arch-list-upgrade)
 (define-key arch-list-mode-map (kbd "U")   #'arch-list-upgrade-all)
+(define-key arch-list-mode-map (kbd "x u") #'arch-list-upgrade-marked)
 (define-key arch-list-mode-map (kbd "SPC") #'arch-list-toggle-mark)
 (define-key arch-list-mode-map (kbd "m")   #'arch-list-menu)
 (define-key arch-list-mode-map (kbd "M")   #'arch-list-unmark-all)
@@ -1857,18 +1897,45 @@ reach into `arch--info-cache' or `arch-pkg' internals directly."
   (map-keys arch--marked))
 
 (defun arch-list-install-marked ()
-  "Install all marked packages.
-Uses the current backend's `install-batch-fn' when available, so one
-operation and one shared worker buffer cover the whole batch; otherwise
-falls back to `arch--install-dispatch' per package."
+  "Install marked packages using `arch-aur-install-method' for AUR packages."
   (interactive)
-  (let ((names (or (arch--list-marked-names)
-		   (user-error "No packages marked")))
-        (backend (or arch--list-backend (arch--default-backend))))
+  (let ((names (or (arch--list-marked-names) (user-error "No packages marked")))
+        (backend (or arch--list-backend (arch--default-backend)))
+        aur official)
+    (dolist (entry arch--all-entries)
+      (let ((pkg (car entry)))
+        (when (member (arch-pkg-name pkg) names)
+          (if (arch-pkg-aur-p pkg)
+              (push (arch-pkg-name pkg) aur)
+            (push (arch-pkg-name pkg) official)))))
+    (unless (= (length names) (+ (length aur) (length official)))
+      (user-error "Some marked packages are not in this list"))
     (when (yes-or-no-p (format "Install %d marked packages? " (length names)))
-      (if-let* ((fn (arch-backend-install-batch-fn backend)))
-          (funcall fn names)
-        (seq-do #'arch--install-dispatch names)))))
+      (when official
+        (if-let* ((fn (arch-backend-install-batch-fn backend)))
+            (funcall fn (nreverse official))
+          (seq-do #'arch--install-dispatch (nreverse official))))
+      (when aur (arch--aur-run (nreverse aur) 'install)))))
+
+(defun arch-list-upgrade-marked ()
+  "Upgrade marked packages, building AUR packages serially by default."
+  (interactive)
+  (let ((names (or (arch--list-marked-names) (user-error "No packages marked")))
+        aur official)
+    (dolist (entry arch--all-entries)
+      (let ((pkg (car entry)))
+        (when (member (arch-pkg-name pkg) names)
+          (if (arch-pkg-aur-p pkg)
+              (push (arch-pkg-name pkg) aur)
+            (push (arch-pkg-name pkg) official)))))
+    (unless (= (length names) (+ (length aur) (length official)))
+      (user-error "Some marked packages are not in this list"))
+    (when (yes-or-no-p (format "Upgrade %d marked packages? " (length names)))
+      (when official
+        (arch--worker-run (append '("sudo" "pacman" "--noconfirm" "--noprogressbar" "--sync")
+                                  (reverse official))
+                          'upgrade (reverse official)))
+      (when aur (arch--aur-run (nreverse aur) 'upgrade)))))
 
 (defun arch-list-remove-marked ()
   "Remove all marked packages."
@@ -1921,7 +1988,7 @@ reinstalling; use `arch-list-upgrade' to upgrade/reinstall it."
   (interactive)
   (let ((pkg (arch-list--pkg-at-point)))
     (if (and (arch-pkg-aur-p pkg) (not (arch-pkg-installed-p pkg)))
-        (arch-abs-install (arch-pkg-name pkg))
+        (arch--aur-run (list (arch-pkg-name pkg)) 'install)
       (arch--install-with-installed-guard (arch-pkg-name pkg) (arch-pkg-installed-p pkg)))))
 
 (defun arch-list-fetch-info ()
@@ -1951,8 +2018,11 @@ Useful for AUR stub entries (version \"<aur>\") added by the widened list."
 (defun arch-list-upgrade ()
   "Upgrade the package at point."
   (interactive)
-  (when-let* ((fn (arch-backend-upgrade-fn (or arch--list-backend (arch--default-backend)))))
-    (funcall fn (arch-pkg-name (arch-list--pkg-at-point)))))
+  (let ((pkg (arch-list--pkg-at-point)))
+    (if (arch-pkg-aur-p pkg)
+        (arch--aur-run (list (arch-pkg-name pkg)) 'upgrade)
+      (when-let* ((fn (arch-backend-upgrade-fn (or arch--list-backend (arch--default-backend)))))
+        (funcall fn (arch-pkg-name pkg))))))
 
 (defun arch-list-upgrade-all ()
   "Upgrade all packages via the current backend."
@@ -2006,7 +2076,8 @@ Rebuilds without pulling; use `arch-list-abs-install' to update source first."
     ("DEL" "Unmark"          arch-list-unmark)
     ("mc"  "Unmark all"      arch-list-unmark-all)
     ("xi"  "Install marked"  arch-list-install-marked)
-    ("xr"  "Remove marked"   arch-list-remove-marked)]
+    ("xr"  "Remove marked"   arch-list-remove-marked)
+    ("xu"  "Upgrade marked"  arch-list-upgrade-marked)]
    ["View"
     ("RET" "Package info"    arch-list-show-info
      :inapt-if-not arch-list--pkg-at-point-p)
@@ -2084,7 +2155,9 @@ Rebuilds without pulling; use `arch-list-abs-install' to update source first."
             :group-name (lambda (name)
                           (when-let* ((pkg (map-elt index name)))
                             (arch-pkg-repo pkg)))))))
-  (arch--install-dispatch pkg-name))
+  (if (arch--package-aur-p pkg-name)
+      (arch--aur-run (list pkg-name) 'install)
+    (arch--install-dispatch pkg-name)))
 
 ;;;###autoload
 (defun arch-remove (pkg-name)
@@ -2129,8 +2202,10 @@ Rebuilds without pulling; use `arch-list-abs-install' to update source first."
               :category 'arch-package
               :group-name (lambda (name)
                             (or (plist-get (arch--cache-get name) 'repository) "aur")))))))
-  (when-let* ((fn (arch-backend-upgrade-fn (arch--default-backend))))
-    (funcall fn pkg-name)))
+  (if (arch--package-aur-p pkg-name)
+      (arch--aur-run (list pkg-name) 'upgrade)
+    (when-let* ((fn (arch-backend-upgrade-fn (arch--default-backend))))
+      (funcall fn pkg-name))))
 
 ;;;###autoload
 (defun arch-upgrade-all ()
@@ -2187,6 +2262,7 @@ individually via `arch-abs-install'."
     :upgradeable-fn #'arch--upgradeable-packages
     :populate-cache-fn #'arch--pacman-populate-cache
     :aur-list-fn #'arch--yay-aur-list
+    :aur-batch-fn #'arch--yay-aur-batch
     :install-methods '((abs     . arch--aur-abs-install)
                        (rebuild . arch--aur-abs-rebuild))
     :default-install-method 'abs
