@@ -456,6 +456,14 @@
 
 ;;; Filter predicates
 
+(ert-deftest arch-test-filter-marked ()
+  "The marked filter uses the current list's marked names."
+  (with-temp-buffer
+    (setq-local arch--marked (make-hash-table :test #'equal))
+    (setf (map-elt arch--marked "one") t)
+    (should (arch--filter-marked-p (arch-pkg--make :name "one")))
+    (should-not (arch--filter-marked-p (arch-pkg--make :name "two")))))
+
 (ert-deftest arch-test-filter-orphan ()
   "Orphan filter matches dep packages not required by others."
   (let ((orphan (arch-pkg--make :name "o" :installed-p t :explicit-p nil :required-by-p nil))

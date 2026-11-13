@@ -1683,6 +1683,10 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
 
 ;;; Filter predicates
 
+(defun arch--filter-marked-p (pkg)
+  "Return non-nil when PKG is marked in the current list."
+  (map-elt arch--marked (arch-pkg-name pkg)))
+
 (defun arch--filter-installed-p (pkg) (arch-pkg-installed-p pkg))
 (defun arch--filter-upgradeable-p (pkg)    (arch-pkg-upgradeable-p pkg))
 (defun arch--filter-aur-p (pkg)            (arch-pkg-aur-p pkg))
@@ -1694,7 +1698,8 @@ Wide mode: w toggles all-packages view (installed-only vs full sync DB).
 (defun arch--filter-not-installed-p (pkg)  (not (arch-pkg-installed-p pkg)))
 
 (defconst arch--filter-options
-  '(("installed"      arch--filter-installed-p     "currently installed")
+  '(("marked"         arch--filter-marked-p        "marked packages")
+    ("installed"      arch--filter-installed-p     "currently installed")
     ("upgradeable"    arch--filter-upgradeable-p   "has an available upgrade")
     ("aur"            arch--filter-aur-p            "AUR/foreign packages")
     ("explicit"       arch--filter-explicit-p       "explicitly installed")
