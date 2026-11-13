@@ -833,7 +833,7 @@ over a window showing a progress buffer, even though both are eligible."
 (ert-deftest arch-test-bury-progress-buffers ()
   "When arch-bury-progress-buffers is t, progress buffer is buried rather than displayed."
   (let ((arch-bury-progress-buffers t)
-        (buf (get-buffer-create "*arch:test-bury*")))
+        (buf (get-buffer-create arch--worker-buffer-name)))
     (unwind-protect
         (let ((proc (arch--pkg-run "test-bury" '("true"))))
           (accept-process-output proc 1)
@@ -869,7 +869,7 @@ over a window showing a progress buffer, even though both are eligible."
   (let* ((arch-abs-directory (make-temp-file "arch-abs-test" t))
          (pkg-dir (expand-file-name "test-pkg" arch-abs-directory))
          (arch-bury-progress-buffers t)
-         (buf (get-buffer-create "*arch:test-abs-directory*")))
+         (buf (get-buffer-create arch--worker-buffer-name)))
     (unwind-protect
         (let ((proc (arch--pkg-run "test-abs-directory" '("true") nil nil pkg-dir)))
           (while (process-live-p proc) (accept-process-output proc 0.1))
@@ -896,7 +896,7 @@ over a window showing a progress buffer, even though both are eligible."
 
 (ert-deftest arch-test-pkg-run-initializes-arch-install-mode ()
   "arch--pkg-run initializes buffer in arch-install-mode and appends command banner."
-  (let ((buf (get-buffer-create "*arch:test-init*")))
+  (let ((buf (get-buffer-create arch--worker-buffer-name)))
     (unwind-protect
         (let ((proc (arch--pkg-run "test-init" '("echo" "hello"))))
           (while (process-live-p proc)
@@ -924,7 +924,7 @@ over a window showing a progress buffer, even though both are eligible."
 
 (ert-deftest arch-test-pkg-run-appends-multiple-commands ()
   "Successive arch--pkg-run calls accumulate output without clearing."
-  (let ((buf (get-buffer-create "*arch:test-append*")))
+  (let ((buf (get-buffer-create arch--worker-buffer-name)))
     (unwind-protect
         (progn
           (let ((proc1 (arch--pkg-run "test-append" '("echo" "first"))))
@@ -1129,3 +1129,35 @@ output does."
     (let ((upgrades (arch--upgradeable-packages)))
       (should (gethash "aur-pkg" upgrades))
       (should (gethash "repo-pkg" upgrades)))))
+
+(ert-deftest arch-test-worker-serializes-operations ()
+  "Queued operations run in order in the same worker buffer."
+  (let ((arch--worker-queue nil) (arch-bury-progress-buffers t)
+        (buf (arch--worker-buffer)))
+    (unwind-protect
+        (progn
+          (arch--pkg-run "first" '("sh" "-c" "sleep 0.1; echo first"))
+          (arch--pkg-run "second" '("echo" "second"))
+          (arch--pkg-run "third" '("echo" "third"))
+          (while (or arch--worker-queue (get-buffer-process buf))
+            (accept-process-output nil 0.1))
+          (with-current-buffer buf
+            (should (string-match-p "first.*second.*third" (replace-regexp-in-string "\n" " " (buffer-string))))
+            (should (equal default-directory (expand-file-name "~/")))))
+      (when-let* ((proc (get-buffer-process buf))) (delete-process proc))
+      (kill-buffer buf))))
+
+(ert-deftest arch-test-worker-continues-after-hook-error ()
+  "A failed completion hook does not block queued operations."
+  (let ((arch--worker-queue nil) (arch-bury-progress-buffers t)
+        (arch-after-install-hook (list (lambda (_) (error "hook failure"))))
+        (buf (arch--worker-buffer)))
+    (unwind-protect
+        (progn
+          (arch--pkg-run "first" '("sh" "-c" "sleep 0.1") 'install "first")
+          (arch--pkg-run "second" '("echo" "after-error"))
+          (while (or arch--worker-queue (get-buffer-process buf))
+            (accept-process-output nil 0.1))
+          (with-current-buffer buf (should (string-match-p "after-error" (buffer-string)))))
+      (when-let* ((proc (get-buffer-process buf))) (delete-process proc))
+      (kill-buffer buf))))

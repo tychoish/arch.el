@@ -14,8 +14,7 @@
 ;; yay backends are provided.  Additional backends can be registered via
 ;; `arch-register-backend'.
 ;;
-;; Package operations run in per-package buffers named *arch:<pkg>* that
-;; accumulate output across rebuilds without clearing.
+;; Package operations run serially in a shared buffer that accumulates output.
 
 ;;; Code:
 
@@ -529,88 +528,50 @@ commands accumulate output in the buffer."
     (unless (derived-mode-p 'arch-install-mode)
       (arch-install-mode))))
 
-(defun arch--pkg-buffer (pkg-name)
-  "Return the dedicated operation buffer for PKG-NAME, creating it if needed."
-  (get-buffer-create (format "*arch:%s*" pkg-name)))
-
-(defun arch--pkg-run (pkg-name args &optional op pkg directory)
-  "Run ARGS in PKG-NAME's dedicated buffer, appending to existing content.
-OP is operation type symbol (\='install, \='upgrade, \='remove, \='upgrade-all).
-PKG is an optional `arch-pkg' struct or package name.
-DIRECTORY is the intended buffer directory, including for a future clone."
-  (let ((buf (arch--pkg-buffer pkg-name)))
-    (arch--init-install-buffer buf)
-    (with-current-buffer buf
-      (let ((inhibit-read-only t)
-            (time-str (format-time-string "%Y-%m-%d %H:%M:%S")))
-        (goto-char (point-max))
-        (insert (propertize (format "\n=== [%s] $ %s ===\n"
-                                    time-str
-                                    (mapconcat #'identity args " "))
-                            'face 'bold))
-        (dolist (win (get-buffer-window-list buf nil t))
-          (set-window-point win (point-max)))))
-    (let* ((default-directory (if directory
-                                  (if (file-directory-p directory)
-                                      (file-name-as-directory directory)
-                                    (file-name-directory (directory-file-name directory)))
-                                default-directory))
-           (proc (make-process
-                 :name (format "arch-%s" pkg-name)
-                 :buffer buf
-                 :command args
-                 :filter #'arch--pkg-filter
-                 :sentinel #'arch--pkg-sentinel)))
-      (when directory
-        (with-current-buffer buf
-          (setq default-directory (file-name-as-directory directory))))
-      (set-process-query-on-exit-flag proc nil)
-      (when op
-        (process-put proc 'arch-op op)
-        (process-put proc 'arch-pkgs (or pkg pkg-name)))
-      (if arch-bury-progress-buffers
-          (bury-buffer buf)
-        (display-buffer buf))
-      proc)))
-
 (defconst arch--worker-buffer-name "*arch-package-worker*"
-  "Name of the shared buffer used for batch-install operations.")
+  "Name of the shared package operation buffer.")
+
+(defvar arch--worker-queue nil "Pending package operations in execution order.")
 
 (defun arch--worker-buffer ()
-  "Return the shared batch-install worker buffer, creating it if needed."
+  "Return the shared package operation buffer."
   (get-buffer-create arch--worker-buffer-name))
 
-(defun arch--worker-run (args &optional op pkgs)
-  "Run ARGS in the shared worker buffer, appending to existing content.
-Parallels `arch--pkg-run', but always targets the one constant worker
-buffer instead of a per-package buffer, so a batch install produces one
-linear scrollback instead of one buffer per package."
-  (let ((buf (arch--worker-buffer)))
-    (arch--init-install-buffer buf)
-    (with-current-buffer buf
-      (let ((inhibit-read-only t)
-            (time-str (format-time-string "%Y-%m-%d %H:%M:%S")))
-        (goto-char (point-max))
-        (insert (propertize (format "\n=== [%s] $ %s ===\n"
-                                    time-str
-                                    (mapconcat #'identity args " "))
-                            'face 'bold))
-        (dolist (win (get-buffer-window-list buf nil t))
-          (set-window-point win (point-max)))))
-    (let ((proc (make-process
-                 :name "arch-worker"
-                 :buffer buf
-                 :command args
-                 :filter #'arch--pkg-filter
-                 :sentinel #'arch--pkg-sentinel)))
-      (set-process-query-on-exit-flag proc nil)
-      (when op
+(defun arch--pkg-run (pkg-name args &optional op pkg directory)
+  "Queue ARGS for PKG-NAME with OP, PKG and DIRECTORY."
+  (arch--worker-run args op (or pkg pkg-name) directory))
+
+(defun arch--worker-run (args &optional op pkgs directory)
+  "Run or queue ARGS with OP, PKGS, and DIRECTORY in the worker buffer."
+  (let* ((buf (arch--worker-buffer))
+         (running (get-buffer-process buf)))
+    (if (and running (process-live-p running))
+        (progn
+          (setq arch--worker-queue
+                (nconc arch--worker-queue (list (list args op pkgs directory))))
+          (message "Queued arch operation: %s" (mapconcat #'identity args " "))
+          nil)
+      (arch--init-install-buffer buf)
+      (let* ((target (file-name-as-directory (or directory (expand-file-name "~/"))))
+             (default-directory (if (file-directory-p target) target
+                                  (file-name-directory (directory-file-name target))))
+             proc)
+        (with-current-buffer buf
+          (setq default-directory target)
+          (let ((inhibit-read-only t))
+            (goto-char (point-max))
+            (insert (propertize (format "\n=== [%s] $ %s ===\n"
+                                        (format-time-string "%Y-%m-%d %H:%M:%S")
+                                        (mapconcat #'identity args " "))
+                                'face 'bold))))
+        (setq proc (make-process :name "arch-worker" :buffer buf :command args
+                                 :filter #'arch--pkg-filter :sentinel #'arch--pkg-sentinel))
+        (set-process-query-on-exit-flag proc nil)
+        (process-put proc 'arch-worker t)
         (process-put proc 'arch-op op)
-        (process-put proc 'arch-pkgs pkgs))
-      (if arch-bury-progress-buffers
-          (bury-buffer buf)
-        (display-buffer buf))
-      proc)))
+        (process-put proc 'arch-pkgs pkgs)
+        (if arch-bury-progress-buffers (bury-buffer buf) (display-buffer buf))
+        proc))))
 
 (defun arch--pkg-filter (proc output)
   "Insert OUTPUT into PROC's buffer, rendering ANSI escape sequences as faces,
@@ -671,7 +632,8 @@ and build-percentage output), and auto-scrolling displaying windows."
           (set-marker (process-mark proc) (point-max))
           (dolist (win (get-buffer-window-list buf nil t))
             (set-window-point win (point-max)))))))
-  (when-let* (((and (eq (process-status proc) 'exit)
+  (condition-case err
+      (when-let* (((and (eq (process-status proc) 'exit)
                      (zerop (process-exit-status proc))))
               (op (process-get proc 'arch-op))
               (pkgs (or (process-get proc 'arch-pkgs) '(nil))))
@@ -692,7 +654,11 @@ and build-percentage output), and auto-scrolling displaying windows."
            (when pkg
              (run-hook-with-args 'arch-after-remove-hook (arch--ensure-pkg pkg))))))
       ('upgrade-all
-       (run-hooks 'arch-after-upgrade-all-hook)))))
+       (run-hooks 'arch-after-upgrade-all-hook))))
+    (error (message "Arch completion hook failed: %s" (error-message-string err))))
+  (when (and (memq (process-status proc) '(exit signal))
+             (process-get proc 'arch-worker) arch--worker-queue)
+    (apply #'arch--worker-run (pop arch--worker-queue))))
 ;;; Parsers
 
 (defun arch--parse-search-output (output)
